@@ -1,5 +1,6 @@
 import discord
 from discord.ext import commands, tasks
+import discord.app_commands as app_commands
 import asyncio
 from datetime import datetime
 from config import DISCORD_BOT_TOKEN
@@ -12,7 +13,7 @@ intents.members = True
 intents.messages = True
 intents.message_content = True
 
-bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
+bot = commands.Bot(command_prefix=None, intents=intents, help_command=None)
 
 class PromotionView(discord.ui.View):
     def __init__(self, server_id: str, discord_id: str, new_role: str, xp_required: int):
@@ -85,6 +86,7 @@ class PromotionView(discord.ui.View):
 async def on_ready():
     print(f"Bot conectado como {bot.user}")
     print(f"Servidores: {len(bot.guilds)}")
+    await bot.tree.sync()
 
 @bot.event
 async def on_message(message):
@@ -180,21 +182,22 @@ async def check_promotion(guild: discord.Guild, member: discord.Member, config: 
                 view = PromotionView(server_id, str(member.id), new_role, xp_required)
                 await channel.send(embed=embed, view=view)
 
-@bot.command(name="xp")
-async def cmd_xp(ctx):
-    server_id = str(ctx.guild.id)
-    user = db.get_user(server_id, str(ctx.author.id))
+@bot.tree.command(name="xp", description="Mostra seu XP atual")
+async def xp(interaction: discord.Interaction):
+    server_id = str(interaction.guild.id)
+    user = db.get_user(server_id, str(interaction.user.id))
     if user:
-        await ctx.send(f"⭐ Seu XP: {user['xp']}")
+        await interaction.response.send_message(f"⭐ Seu XP: {user['xp']}")
     else:
-        await ctx.send("❌ Dados não encontrados.")
+        await interaction.response.send_message("❌ Dados não encontrados.")
 
-@bot.command(name="ranking")
-async def cmd_ranking(ctx, limit: int = 10):
-    server_id = str(ctx.guild.id)
+@bot.tree.command(name="ranking", description="Exibe o ranking de XP")
+@app_commands.describe(limit="Número de usuários a mostrar (padrão: 10)")
+async def ranking(interaction: discord.Interaction, limit: int = 10):
+    server_id = str(interaction.guild.id)
     ranking = db.get_ranking(server_id, limit)
     if not ranking:
-        await ctx.send("📊 Nenhum usuário encontrado.")
+        await interaction.response.send_message("📊 Nenhum usuário encontrado.")
         return
 
     embed = discord.Embed(title="🏆 Ranking de XP", color=discord.Color.gold())
@@ -205,7 +208,7 @@ async def cmd_ranking(ctx, limit: int = 10):
             inline=False
         )
 
-    await ctx.send(embed=embed)
+    await interaction.response.send_message(embed=embed)
 
 def run_bot():
     if DISCORD_BOT_TOKEN:
