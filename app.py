@@ -9,9 +9,19 @@ app = Flask(__name__)
 app.secret_key = SECRET_KEY
 app.config["SESSION_COOKIE_SECURE"] = True
 app.config["SESSION_COOKIE_HTTPONLY"] = True
-app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SAMESITE"] = "None"
 
-CORS(app, origins=[FRONTEND_URL], supports_credentials=True)
+CORS(
+    app,
+    resources={r"/api/*": {"origins": [
+        "https://v0-painel-de-recrutamento-discord.vercel.app",
+        "http://localhost:5173",
+        "http://localhost:3000"
+    ]}},
+    supports_credentials=True,
+    allow_headers=["Content-Type", "Authorization"],
+    methods=["GET", "POST", "OPTIONS"]
+)
 
 # Middleware para verificar login
 def login_required(f):
