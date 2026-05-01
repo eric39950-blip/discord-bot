@@ -3,6 +3,7 @@ from discord.ext import commands, tasks
 import discord.app_commands as app_commands
 import asyncio
 from datetime import datetime, timedelta
+from typing import Optional
 from config import DISCORD_BOT_TOKEN
 from database import db
 from discord_api import DiscordAPI
@@ -14,6 +15,14 @@ intents.messages = True
 intents.message_content = True
 
 bot = commands.Bot(command_prefix=None, intents=intents, help_command=None)
+
+ROLE_HIERARCHY = ["recruta", "soldado", "cabo", "sargento"]
+ROLE_LABELS = {
+    "recruta": "Recruta",
+    "soldado": "Soldado",
+    "cabo": "Cabo",
+    "sargento": "Sargento",
+}
 
 async def send_log_embed(guild: discord.Guild, embed: discord.Embed):
     config = db.get_config(str(guild.id))
@@ -298,8 +307,9 @@ async def on_ready():
     print(f"Servidores: {len(bot.guilds)}")
     await bot.tree.sync()
 
-    # Iniciar task de lembretes
+    # Iniciar task de lembretes e monitor de inatividade
     lembrete_task.start()
+    inactivity_task.start()
 
 @bot.event
 async def on_message(message):
@@ -409,6 +419,7 @@ async def on_message(message):
             return
 
         user = db.create_or_update_user(server_id, str(message.author.id), str(message.author))
+        db.update_last_activity(server_id, str(message.author.id))
         cooldown = config.get("cooldown_msg", 60)
         now = int(datetime.now().timestamp())
         if now - user.get("ultimo_xp_msg", 0) < cooldown:
@@ -425,6 +436,143 @@ async def on_message(message):
         await bot.process_commands(message)
     except Exception as e:
         print("Erro ao processar comandos:", e)
+
+@bot.event
+async def on_raw_reaction_add(payload):
+    try:
+        if payload.user_id == bot.user.id:
+            return
+
+        if str(payload.emoji) != "✅":
+            return
+
+        if not payload.guild_id or not payload.channel_id:
+            return
+
+        guild = bot.get_guild(payload.guild_id)
+        if not guild:
+            return
+
+        member = guild.get_member(payload.user_id)
+        if not member or not member.guild_permissions.manage_roles:
+            return
+
+        channel = guild.get_channel(payload.channel_id)
+        if not channel or not channel.name.startswith("ticket-"):
+            return
+
+        try:
+            message = await channel.fetch_message(payload.message_id)
+        except Exception:
+            return
+
+        if message.author.bot or message.author.id == payload.user_id:
+            return
+
+        config = db.get_config(str(guild.id))
+        cargo_id = config.get("cargo_verificado")
+        if not cargo_id:
+            return
+
+        role = guild.get_role(int(cargo_id))
+        if not role:
+            return
+
+        target_member = guild.get_member(message.author.id)
+        if not target_member:
+            return
+
+        if role not in target_member.roles:
+            try:
+                await target_member.add_roles(role, reason="Verificado por staff")
+                await channel.send(f"✅ {target_member.mention} recebeu o cargo {role.mention}.")
+            except Exception:
+                pass
+    except Exception as e:
+        print("Erro em on_raw_reaction_add:", e)
+
+def get_next_lower_role(role_key: str) -> Optional[str]:
+    if role_key not in ROLE_HIERARCHY:
+        return None
+    index = ROLE_HIERARCHY.index(role_key)
+    if index <= 0:
+        return None
+    return ROLE_HIERARCHY[index - 1]
+
+async def ensure_role_for_key(guild: discord.Guild, config: dict, role_key: str) -> Optional[discord.Role]:
+    role_id = config.get(f"cargo_{role_key}")
+    if not role_id:
+        return None
+    return guild.get_role(int(role_id))
+
+@tasks.loop(minutes=60)
+async def inactivity_task():
+    now_ts = int(datetime.now().timestamp())
+    for guild in bot.guilds:
+        server_id = str(guild.id)
+        config = db.get_config(server_id)
+        users = db.get_users_with_activity(server_id)
+
+        for user_data in users:
+            last_activity = user_data.get("ultimo_atividade", 0)
+            if last_activity <= 0:
+                continue
+
+            member = guild.get_member(int(user_data["discord_id"]))
+            if not member:
+                continue
+
+            if user_data.get("ultimo_inatividade_3d", 0) == 0:
+                if now_ts - last_activity >= 3 * 24 * 60 * 60:
+                    try:
+                        await member.send(
+                            "👋 Olá! Você está inativo há 3 dias. "
+                            "Esta é uma mensagem automática, não é adm. "
+                            "Por favor, responda esta mensagem ou volte a interagir no servidor para evitar ações automáticas."
+                        )
+                        db.mark_inactivity_warning(server_id, str(member.id), 3)
+                    except Exception:
+                        pass
+
+            if user_data.get("ultimo_inatividade_7d", 0) == 0:
+                if now_ts - last_activity >= 7 * 24 * 60 * 60:
+                    try:
+                        await member.send(
+                            "⚠️ Você está inativo há 7 dias. "
+                            "Precisamos de sua resposta para manter seu cargo. "
+                            "Responda esta mensagem ou volte a participar no servidor."
+                        )
+                        db.mark_inactivity_warning(server_id, str(member.id), 7)
+                    except Exception:
+                        pass
+
+            if user_data.get("rebaixado_inativo", 0) == 0:
+                if now_ts - last_activity >= 10 * 24 * 60 * 60:
+                    current_role = user_data.get("cargo_atual")
+                    lower_role_key = get_next_lower_role(current_role or "")
+                    if lower_role_key:
+                        current_discord_role = await ensure_role_for_key(guild, config, current_role)
+                        lower_discord_role = await ensure_role_for_key(guild, config, lower_role_key)
+                        try:
+                            if current_discord_role and current_discord_role in member.roles:
+                                await member.remove_roles(current_discord_role, reason="Rebaixamento por inatividade")
+                            if lower_discord_role:
+                                await member.add_roles(lower_discord_role, reason="Rebaixamento por inatividade")
+                                db.update_user_role(server_id, str(member.id), lower_role_key)
+                                await member.send(
+                                    "⏳ Você foi rebaixado por 10 dias de inatividade. "
+                                    f"Seu novo cargo agora é {lower_discord_role.name}."
+                                )
+                            else:
+                                await member.send(
+                                    "⏳ Você foi considerado para rebaixamento por 10 dias de inatividade, "
+                                    "mas não há cargo inferior configurado."
+                                )
+                            db.mark_inactivity_demoted(server_id, str(member.id))
+                        except Exception:
+                            pass
+                    else:
+                        db.mark_inactivity_demoted(server_id, str(member.id))
 
 async def check_promotion(guild: discord.Guild, member: discord.Member, config: dict):
     server_id = str(guild.id)
@@ -547,8 +695,34 @@ async def help(interaction: discord.Interaction):
     embed.add_field(name="/setup_logs", value="Configura notificações de eventos (staff)", inline=False)
     embed.add_field(name="/close", value="Fecha ticket (staff)", inline=False)
     embed.add_field(name="/set_ping_treinos", value="Define cargo para ping de treinos (staff)", inline=False)
+    embed.add_field(name="/set_verified_role", value="Define o cargo de verificado para tickets", inline=False)
+    embed.add_field(name="/last_active", value="Mostra quando um usuário falou por último", inline=False)
+    embed.add_field(name="/inactive", value="Mostra usuários inativos", inline=False)
+    embed.add_field(name="/hierarchy", value="Mostra cargos/hierarquia do servidor", inline=False)
     embed.add_field(name="+registro treino", value="Registra treino e notifica membros (staff)", inline=False)
     await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="hierarchy", description="Mostra cargos/hierarquia do servidor")
+async def hierarchy(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.manage_roles:
+        await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+        return
+
+    server_id = str(interaction.guild.id)
+    config = db.get_config(server_id)
+    lines = []
+    for role_key in ROLE_HIERARCHY:
+        role_id = config.get(f"cargo_{role_key}")
+        if role_id:
+            role = interaction.guild.get_role(int(role_id))
+            lines.append(f"{ROLE_LABELS.get(role_key, role_key.title())}: {role.mention if role else 'Cargo não encontrado'}")
+        else:
+            lines.append(f"{ROLE_LABELS.get(role_key, role_key.title())}: Não configurado")
+
+    await interaction.response.send_message(
+        "**Hierarquia de cargos:**\n" + "\n".join(lines),
+        ephemeral=True
+    )
 
 @bot.tree.command(name="user", description="Ver perfil/XP de um usuário")
 @app_commands.describe(user="Usuário")
@@ -749,6 +923,75 @@ async def set_ping_treinos(interaction: discord.Interaction, role: discord.Role)
     db.save_config(config)
 
     await interaction.response.send_message(f"✅ Cargo de ping treinos definido como {role.mention}!")
+
+@bot.tree.command(name="set_verified_role", description="Define o cargo de verificado para tickets")
+@app_commands.describe(role="Cargo que será dado quando staff marcar o formulário")
+async def set_verified_role(interaction: discord.Interaction, role: discord.Role):
+    if not interaction.user.guild_permissions.manage_roles:
+        await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+        return
+
+    server_id = str(interaction.guild.id)
+    config = db.get_config(server_id)
+    config["cargo_verificado"] = str(role.id)
+    db.save_config(config)
+
+    await interaction.response.send_message(f"✅ Cargo de verificado definido como {role.mention}!", ephemeral=True)
+
+@bot.tree.command(name="last_active", description="Mostra quando um usuário falou por último")
+@app_commands.describe(user="Usuário para verificar")
+async def last_active(interaction: discord.Interaction, user: discord.Member):
+    if not interaction.user.guild_permissions.manage_roles:
+        await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+        return
+
+    server_id = str(interaction.guild.id)
+    last_activity = db.get_last_activity(server_id, str(user.id))
+    if not last_activity:
+        await interaction.response.send_message(f"❌ Sem registro de atividade para {user.mention}.", ephemeral=True)
+        return
+
+    last_active_dt = datetime.fromtimestamp(last_activity)
+    delta = datetime.now() - last_active_dt
+    await interaction.response.send_message(
+        f"✅ {user.mention} teve atividade pela última vez {discord.utils.format_dt(last_active_dt, style='R')} ({delta.days}d {delta.seconds // 3600}h { (delta.seconds % 3600) // 60 }m atrás).",
+        ephemeral=True
+    )
+
+@bot.tree.command(name="inactive", description="Mostra usuários inativos")
+@app_commands.describe(minutes="Minutos sem atividade")
+async def inactive(interaction: discord.Interaction, minutes: int = 60):
+    if not interaction.user.guild_permissions.manage_roles:
+        await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+        return
+
+    if minutes <= 0:
+        await interaction.response.send_message("❌ O valor precisa ser maior que zero.", ephemeral=True)
+        return
+
+    server_id = str(interaction.guild.id)
+    inactive_seconds = minutes * 60
+    users = db.get_inactive_users(server_id, inactive_seconds)
+    if not users:
+        await interaction.response.send_message(f"✅ Nenhum usuário inativo por mais de {minutes} minutos.", ephemeral=True)
+        return
+
+    lines = []
+    for user_data in users[:25]:
+        member = interaction.guild.get_member(int(user_data["discord_id"]))
+        if not member:
+            continue
+        last_active_dt = datetime.fromtimestamp(user_data["ultimo_atividade"])
+        lines.append(f"{member.mention} — {discord.utils.format_dt(last_active_dt, style='R')}")
+
+    if not lines:
+        await interaction.response.send_message(f"✅ Nenhum usuário inativo por mais de {minutes} minutos encontrado no servidor.", ephemeral=True)
+        return
+
+    await interaction.response.send_message(
+        "Usuarios inativos:\n" + "\n".join(lines[:25]),
+        ephemeral=True
+    )
 
 @tasks.loop(minutes=1)
 async def lembrete_task():
