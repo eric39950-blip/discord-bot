@@ -117,17 +117,57 @@ class TicketView(discord.ui.View):
         embed.set_footer(text="Somente você e staff com permissão podem ver este canal.")
 
         await channel.send(embed=embed)
-        await channel.send(
-            "Você deve fazer sua verificação para ter acesso ao nossa União! Aqui está nosso formulário de aplicação; complete ele!\n\n"
-            "Nickname no roblox ( Não Apelido )  : \n"
-            "Usuário do discord ( Não Apelido ) : \n"
-            "Nacionalidade ( de qual País você é ) : \n"
-            "Jura lealdade pela vossa nação? (Sim ou não) : \n"
-            "Entende que sua atividade é crucial na vossa nação? ()\n"
-            "Pegou seus cargos selecionáveis ⁠#cargos-selecionaveis  (Sim)\n"
-            "Pretende focar na nossa nação ( Sim, ou se quer ser mercenário, priorizando outras facções ante a nossa ) ? : \n"
-            "Solicitou no Grupo? https://www.roblox.com/share/g/35338327"
+        
+        # Embed do formulário de verificação
+        form_embed = discord.Embed(
+            title="📋 Formulário de Verificação",
+            description="Você deve fazer sua verificação para ter acesso ao nossa União! Complete o formulário abaixo com as informações solicitadas.",
+            color=discord.Color.from_rgb(255, 165, 0)
         )
+        
+        form_embed.add_field(
+            name="🎮 Nickname no Roblox",
+            value="( Não Apelido )",
+            inline=False
+        )
+        form_embed.add_field(
+            name="👤 Usuário do Discord",
+            value="( Não Apelido )",
+            inline=False
+        )
+        form_embed.add_field(
+            name="🌍 Nacionalidade",
+            value="( De qual País você é )",
+            inline=False
+        )
+        form_embed.add_field(
+            name="⚔️ Jura lealdade pela vossa nação?",
+            value="( Sim ou não )",
+            inline=False
+        )
+        form_embed.add_field(
+            name="💪 Entende que sua atividade é crucial na vossa nação?",
+            value="( )",
+            inline=False
+        )
+        form_embed.add_field(
+            name="🏷️ Pegou seus cargos selecionáveis",
+            value="⁠#cargos-selecionaveis ( Sim )",
+            inline=False
+        )
+        form_embed.add_field(
+            name="🎯 Pretende focar na nossa nação",
+            value="( Sim, ou se quer ser mercenário, priorizando outras facções ante a nossa )",
+            inline=False
+        )
+        form_embed.add_field(
+            name="👥 Solicitou no Grupo",
+            value="[Clique aqui](https://www.roblox.com/share/g/35338327)",
+            inline=False
+        )
+        form_embed.set_footer(text="⏰ Por favor, responda com atenção a todos os campos")
+        
+        await channel.send(embed=form_embed)
         await interaction.response.send_message("✅ Ticket criado! Verifique o canal criado.", ephemeral=True)
 
 @bot.event
