@@ -9,19 +9,9 @@ app = Flask(__name__)
 app.secret_key = SECRET_KEY
 app.config["SESSION_COOKIE_SECURE"] = True
 app.config["SESSION_COOKIE_HTTPONLY"] = True
-app.config["SESSION_COOKIE_SAMESITE"] = "None"
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
-CORS(
-    app,
-    resources={r"/api/*": {"origins": [
-        "https://v0-painel-de-recrutamento-discord.vercel.app",
-        "http://localhost:5173",
-        "http://localhost:3000"
-    ]}},
-    supports_credentials=True,
-    allow_headers=["Content-Type", "Authorization"],
-    methods=["GET", "POST", "OPTIONS"]
-)
+CORS(app, origins=[FRONTEND_URL], supports_credentials=True)
 
 # Middleware para verificar login
 def login_required(f):
@@ -83,9 +73,10 @@ def api_server_authorize(server_id):
 @app.route("/api/server/<server_id>/channels")
 @login_required
 def api_server_channels(server_id):
-    authorized, _ = Auth.can_manage_server(server_id)
+    authorized, reason = Auth.can_manage_server(server_id)
+    print("AUTH CHECK:", server_id, authorized, reason)
     if not authorized:
-        return jsonify({"error": "unauthorized"}), 403
+        return jsonify({"error": "unauthorized", "reason": reason}), 403
 
     channels = DiscordAPI.get_guild_channels(server_id)
     return jsonify({"channels": channels})
@@ -93,9 +84,10 @@ def api_server_channels(server_id):
 @app.route("/api/server/<server_id>/roles")
 @login_required
 def api_server_roles(server_id):
-    authorized, _ = Auth.can_manage_server(server_id)
+    authorized, reason = Auth.can_manage_server(server_id)
+    print("AUTH CHECK:", server_id, authorized, reason)
     if not authorized:
-        return jsonify({"error": "unauthorized"}), 403
+        return jsonify({"error": "unauthorized", "reason": reason}), 403
 
     roles = DiscordAPI.get_guild_roles(server_id)
     return jsonify({"roles": roles})
@@ -107,9 +99,10 @@ def api_get_config():
     if not server_id:
         return jsonify({"error": "server_id_required"}), 400
 
-    authorized, _ = Auth.can_manage_server(server_id)
+    authorized, reason = Auth.can_manage_server(server_id)
+    print("AUTH CHECK:", server_id, authorized, reason)
     if not authorized:
-        return jsonify({"error": "unauthorized"}), 403
+        return jsonify({"error": "unauthorized", "reason": reason}), 403
 
     config = db.get_config(server_id)
     return jsonify({"config": config})
