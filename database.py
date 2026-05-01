@@ -28,6 +28,7 @@ class Database:
                     cargo_sargento TEXT,
                     cargo_ping_treinos TEXT,
                     canal_treinos TEXT,
+                    cargo_verificado TEXT,
                     lembrete_treino_minutos INTEGER DEFAULT 30,
                     dm_treinos INTEGER DEFAULT 1,
                     xp_soldado INTEGER DEFAULT 100,
@@ -54,6 +55,10 @@ class Database:
                     xp INTEGER DEFAULT 0,
                     cargo_atual TEXT,
                     ultimo_xp_msg INTEGER DEFAULT 0,
+                    ultimo_atividade INTEGER DEFAULT 0,
+                    ultimo_inatividade_3d INTEGER DEFAULT 0,
+                    ultimo_inatividade_7d INTEGER DEFAULT 0,
+                    rebaixado_inativo INTEGER DEFAULT 0,
                     treino_confirmado INTEGER DEFAULT 0,
                     UNIQUE(server_id, discord_id)
                 )
@@ -65,6 +70,28 @@ class Database:
             except sqlite3.OperationalError:
                 pass  # Coluna já existe
 
+            # Adicionar coluna ultimo_atividade se não existir
+            try:
+                cursor.execute("ALTER TABLE usuarios ADD COLUMN ultimo_atividade INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass  # Coluna já existe
+
+            # Adicionar coluna ultimo_inatividade_3d se não existir
+            try:
+                cursor.execute("ALTER TABLE usuarios ADD COLUMN ultimo_inatividade_3d INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass
+            # Adicionar coluna ultimo_inatividade_7d se não existir
+            try:
+                cursor.execute("ALTER TABLE usuarios ADD COLUMN ultimo_inatividade_7d INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass
+            # Adicionar coluna rebaixado_inativo se não existir
+            try:
+                cursor.execute("ALTER TABLE usuarios ADD COLUMN rebaixado_inativo INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass
+
             # Adicionar coluna cargo_ping_treinos se não existir
             try:
                 cursor.execute("ALTER TABLE configuracoes ADD COLUMN cargo_ping_treinos TEXT")
@@ -74,6 +101,10 @@ class Database:
             # Adicionar novos campos na config
             try:
                 cursor.execute("ALTER TABLE configuracoes ADD COLUMN canal_treinos TEXT")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("ALTER TABLE configuracoes ADD COLUMN cargo_verificado TEXT")
             except sqlite3.OperationalError:
                 pass
             try:
@@ -150,6 +181,7 @@ class Database:
                 "cargo_sargento": None,
                 "cargo_ping_treinos": None,
                 "canal_treinos": None,
+                "cargo_verificado": None,
                 "lembrete_treino_minutos": 30,
                 "dm_treinos": 1,
                 "xp_soldado": 100,
@@ -172,16 +204,21 @@ class Database:
                 INSERT OR REPLACE INTO configuracoes (
                     server_id, canal_avaliacao, canal_registro, canal_logs,
                     cargo_recruta, cargo_soldado, cargo_cabo, cargo_sargento,
+                    cargo_ping_treinos, canal_treinos, cargo_verificado,
+                    lembrete_treino_minutos, dm_treinos,
                     xp_soldado, xp_cabo, xp_sargento, pontos_por_msg,
                     pontos_por_registro, cooldown_msg, auto_promover,
                     precisa_aprovacao, sistema_ativo, usar_dm, usar_ia
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 config["server_id"], config.get("canal_avaliacao"), config.get("canal_registro"),
                 config.get("canal_logs"), config.get("cargo_recruta"), config.get("cargo_soldado"),
-                config.get("cargo_cabo"), config.get("cargo_sargento"), config.get("xp_soldado", 100),
-                config.get("xp_cabo", 300), config.get("xp_sargento", 600), config.get("pontos_por_msg", 10),
-                config.get("pontos_por_registro", 50), config.get("cooldown_msg", 60), config.get("auto_promover", 1),
+                config.get("cargo_cabo"), config.get("cargo_sargento"), config.get("cargo_ping_treinos"),
+                config.get("canal_treinos"), config.get("cargo_verificado"),
+                config.get("lembrete_treino_minutos", 30), config.get("dm_treinos", 1),
+                config.get("xp_soldado", 100), config.get("xp_cabo", 300), config.get("xp_sargento", 600),
+                config.get("pontos_por_msg", 10), config.get("pontos_por_registro", 50),
+                config.get("cooldown_msg", 60), config.get("auto_promover", 1),
                 config.get("precisa_aprovacao", 1), config.get("sistema_ativo", 1), config.get("usar_dm", 1),
                 config.get("usar_ia", 0)
             ))
@@ -249,6 +286,86 @@ class Database:
 
         user["xp"] = new_xp
         return user
+
+    def update_last_activity(self, server_id: str, discord_id: str, timestamp: Optional[int] = None) -> bool:
+        if timestamp is None:
+            timestamp = int(datetime.now().timestamp())
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE usuarios SET ultimo_atividade = ?
+                WHERE server_id = ? AND discord_id = ?
+            """, (timestamp, server_id, discord_id))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def reset_inactivity_flags(self, server_id: str, discord_id: str) -> bool:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE usuarios SET ultimo_inatividade_3d = 0, ultimo_inatividade_7d = 0, rebaixado_inativo = 0
+                WHERE server_id = ? AND discord_id = ?
+            """, (server_id, discord_id))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def mark_inactivity_warning(self, server_id: str, discord_id: str, days: int) -> bool:
+        column = None
+        if days == 3:
+            column = "ultimo_inatividade_3d"
+        elif days == 7:
+            column = "ultimo_inatividade_7d"
+        else:
+            return False
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(f"UPDATE usuarios SET {column} = ? WHERE server_id = ? AND discord_id = ?", (int(datetime.now().timestamp()), server_id, discord_id))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def mark_inactivity_demoted(self, server_id: str, discord_id: str) -> bool:
+        timestamp = int(datetime.now().timestamp())
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE usuarios SET 
+                    rebaixado_inativo = ?,
+                    ultimo_inatividade_3d = ?,
+                    ultimo_inatividade_7d = ?
+                WHERE server_id = ? AND discord_id = ?
+            """, (timestamp, timestamp, timestamp, server_id, discord_id))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def get_last_activity(self, server_id: str, discord_id: str) -> Optional[int]:
+        user = self.get_user(server_id, discord_id)
+        if not user:
+            return None
+        return user.get("ultimo_atividade", 0)
+
+    def get_inactive_users(self, server_id: str, inactive_seconds: int) -> List[Dict[str, Any]]:
+        cutoff = int(datetime.now().timestamp()) - inactive_seconds
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM usuarios
+                WHERE server_id = ? AND ultimo_atividade > 0 AND ultimo_atividade <= ?
+                ORDER BY ultimo_atividade ASC
+            """, (server_id, cutoff))
+            rows = cursor.fetchall()
+            columns = [desc[0] for desc in cursor.description]
+            return [dict(zip(columns, row)) for row in rows]
+
+    def get_users_with_activity(self, server_id: str) -> List[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM usuarios WHERE server_id = ? AND ultimo_atividade > 0
+            """, (server_id,))
+            rows = cursor.fetchall()
+            columns = [desc[0] for desc in cursor.description]
+            return [dict(zip(columns, row)) for row in rows]
 
     def update_user_role(self, server_id: str, discord_id: str, cargo: str) -> bool:
         with self._get_connection() as conn:
