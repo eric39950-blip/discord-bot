@@ -82,6 +82,43 @@ class PromotionView(discord.ui.View):
             child.disabled = True
         await interaction.message.edit(view=self)
 
+class TicketView(discord.ui.View):
+    @discord.ui.button(label="🎫 Abrir Ticket", style=discord.ButtonStyle.primary)
+    async def open_ticket(self, interaction: discord.Interaction):
+        guild = interaction.guild
+        user = interaction.user
+
+        # Verificar se já existe ticket aberto
+        existing_ticket = discord.utils.get(guild.channels, name=f"ticket-{user.id}")
+        if existing_ticket:
+            await interaction.response.send_message("❌ Você já tem um ticket aberto.", ephemeral=True)
+            return
+
+        # Criar canal de ticket privado para o usuário
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(read_messages=False),
+            user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
+        }
+
+        # Conceder acesso a cargos de staff/admin com permissão de manage_channels
+        for role in guild.roles:
+            if role.permissions.manage_channels and role != guild.default_role:
+                overwrites[role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
+
+        category = interaction.channel.category
+        channel = await guild.create_text_channel(f"ticket-{user.id}", overwrites=overwrites, category=category)
+
+        embed = discord.Embed(
+            title="🎫 Ticket Aberto",
+            description=f"Olá {user.mention}, seu ticket foi aberto. Aguarde o suporte responder aqui.",
+            color=discord.Color.green()
+        )
+        embed.add_field(name="Canal", value=channel.mention, inline=False)
+        embed.set_footer(text="Somente você e staff com permissão podem ver este canal.")
+
+        await channel.send(embed=embed)
+        await interaction.response.send_message("✅ Ticket criado! Verifique o canal criado.", ephemeral=True)
+
 @bot.event
 async def on_ready():
     print(f"Bot conectado como {bot.user}")
@@ -209,6 +246,59 @@ async def ranking(interaction: discord.Interaction, limit: int = 10):
         )
 
     await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="addxp", description="Adiciona XP a um usuário (staff)")
+@app_commands.describe(user="Usuário", amount="Quantidade de XP", reason="Motivo")
+async def addxp(interaction: discord.Interaction, user: discord.Member, amount: int, reason: str = "Manual"):
+    if not interaction.user.guild_permissions.manage_roles:
+        await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+        return
+
+    if amount <= 0:
+        await interaction.response.send_message("❌ Quantidade deve ser positiva.", ephemeral=True)
+        return
+
+    server_id = str(interaction.guild.id)
+    db.add_xp(server_id, str(user.id), amount, "manual", reason)
+    await interaction.response.send_message(f"✅ Adicionado {amount} XP para {user.mention}. Motivo: {reason}")
+
+@bot.tree.command(name="help", description="Mostra ajuda")
+async def help(interaction: discord.Interaction):
+    embed = discord.Embed(title="Ajuda do Bot", description="Comandos disponíveis:")
+    embed.add_field(name="/xp", value="Mostra seu XP atual", inline=False)
+    embed.add_field(name="/ranking", value="Exibe o ranking de XP", inline=False)
+    embed.add_field(name="/addxp", value="Adiciona XP a um usuário (staff)", inline=False)
+    embed.add_field(name="/setup_ticket", value="Configura sistema de tickets (staff)", inline=False)
+    embed.add_field(name="/close", value="Fecha ticket (staff)", inline=False)
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="setup_ticket", description="Configura o sistema de tickets neste canal (staff)")
+async def setup_ticket(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.manage_channels:
+        await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+        return
+
+    embed = discord.Embed(
+        title="🎫 Sistema de Suporte",
+        description="Clique no botão abaixo para abrir um ticket de suporte.",
+        color=discord.Color.blue()
+    )
+    view = TicketView()
+    await interaction.response.send_message(embed=embed, view=view)
+
+@bot.tree.command(name="close", description="Fecha o ticket atual (staff)")
+async def close(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.manage_channels:
+        await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+        return
+
+    if not interaction.channel.name.startswith("ticket-"):
+        await interaction.response.send_message("❌ Este comando só pode ser usado em canais de ticket.", ephemeral=True)
+        return
+
+    await interaction.response.send_message("🔒 Ticket fechado!")
+    await asyncio.sleep(3)  # Pequena pausa
+    await interaction.channel.delete()
 
 def run_bot():
     if DISCORD_BOT_TOKEN:
