@@ -15,6 +15,18 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix=None, intents=intents, help_command=None)
 
+async def send_log_embed(guild: discord.Guild, embed: discord.Embed):
+    config = db.get_config(str(guild.id))
+    canal_logs = config.get("canal_logs")
+    if not canal_logs:
+        return
+    channel = guild.get_channel(int(canal_logs))
+    if channel:
+        try:
+            await channel.send(embed=embed)
+        except:
+            pass
+
 class PromotionView(discord.ui.View):
     def __init__(self, server_id: str, discord_id: str, new_role: str, xp_required: int):
         super().__init__(timeout=86400)  # 24 horas
@@ -232,6 +244,14 @@ class TicketView(discord.ui.View):
                     await admin.send(embed=notif_embed)
                 except:
                     pass  # Ignorar erro de DM
+
+        log_embed = discord.Embed(
+            title="🎫 Ticket Aberto",
+            description=f"{user.mention} abriu um ticket de verificação.",
+            color=discord.Color.orange()
+        )
+        log_embed.add_field(name="Canal", value=f"[Ir para o ticket]({channel.jump_url})", inline=False)
+        await send_log_embed(guild, log_embed)
         
         await interaction.response.send_message("✅ Ticket criado! Verifique o canal criado.", ephemeral=True)
 
@@ -564,8 +584,27 @@ async def setup_logs(interaction: discord.Interaction):
     )
     embed.set_footer(text="Clique nos botões para ativar/desativar notificações")
     
+    server_id = str(interaction.guild.id)
+    config = db.get_config(server_id)
+    config["canal_logs"] = str(interaction.channel.id)
+    db.save_config(config)
+
+    embed.add_field(
+        name="📍 Canal de Logs",
+        value=f"Este canal foi definido como canal de logs para o servidor.",
+        inline=False
+    )
+    embed.set_footer(text="Todos os eventos vão ser enviados aqui quando acontecerem.")
+
     view = LogsView(str(interaction.guild.id))
     await interaction.response.send_message(embed=embed, view=view)
+
+    log_embed = discord.Embed(
+        title="📌 Canal de Logs Configurado",
+        description=f"Este canal foi definido como canal de logs por {interaction.user.mention}.",
+        color=discord.Color.gold()
+    )
+    await send_log_embed(interaction.guild, log_embed)
 
 @bot.tree.command(name="close", description="Fecha o ticket atual (staff)")
 async def close(interaction: discord.Interaction):
