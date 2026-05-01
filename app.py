@@ -140,6 +140,24 @@ def api_ranking():
     ranking = db.get_ranking(server_id, limit)
     return jsonify({"ranking": ranking})
 
+@app.route("/api/stats")
+@login_required
+def api_stats():
+    user = Auth.get_current_user()
+    if not user:
+        return jsonify({"error": "unauthorized"}), 401
+
+    server_id = request.args.get("server_id")
+    if not server_id:
+        return jsonify({"error": "server_id_required"}), 400
+
+    authorized, _ = Auth.can_manage_server(server_id)
+    if not authorized:
+        return jsonify({"error": "unauthorized"}), 403
+
+    stats = db.get_stats(server_id)
+    return jsonify(stats)
+
 @app.route("/api/usuario/<discord_id>/xp", methods=["POST"])
 @login_required
 def api_add_xp(discord_id):
