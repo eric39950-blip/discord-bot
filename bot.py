@@ -270,6 +270,22 @@ class FormularioView(discord.ui.View):
         """
         await interaction.response.send_message(f"```\n{formulario_texto}\n```", ephemeral=True)
 
+class TreinoConfirmView(discord.ui.View):
+    def __init__(self, server_id: str, discord_id: str):
+        super().__init__(timeout=None)
+        self.server_id = server_id
+        self.discord_id = discord_id
+
+    @discord.ui.button(label="✅ Vou ao Treino", style=discord.ButtonStyle.success)
+    async def confirm_treino(self, interaction: discord.Interaction, button: discord.ui.Button):
+        db.set_treino_confirmado(self.server_id, self.discord_id, True)
+        await interaction.response.send_message("✅ Confirmado! Você será notificado quando o treino começar.", ephemeral=True)
+
+    @discord.ui.button(label="❌ Não Vou", style=discord.ButtonStyle.danger)
+    async def decline_treino(self, interaction: discord.Interaction, button: discord.ui.Button):
+        db.set_treino_confirmado(self.server_id, self.discord_id, False)
+        await interaction.response.send_message("❌ Ok, você não será notificado.", ephemeral=True)
+
 @bot.event
 async def on_ready():
     print(f"Bot conectado como {bot.user}")
@@ -300,16 +316,85 @@ async def on_message(message):
                 "pretende focar",
                 "solicitou no grupo"
             ]
-            found = sum(1 for marker in markers if marker in content)
+            found = sum(1 for marker in marker if marker in content)
 
             if found >= 3:
                 try:
+                    await message.add_reaction("✅")
                     await message.reply(
                         "✅ Formulário recebido! Aguarde um membro da equipe revisar sua solicitação.",
                         mention_author=False
                     )
                 except:
                     pass  # Ignorar erro de resposta
+
+    # Comando +registro treino
+    if message.content.lower() == "+registro treino":
+        if not message.author.guild_permissions.manage_roles:
+            await message.reply("❌ Você não tem permissão para registrar treinos.", mention_author=False)
+            return
+
+        server_id = str(message.guild.id)
+        config = db.get_config(server_id)
+        cargo_ping = config.get("cargo_ping_treinos")
+        if not cargo_ping:
+            await message.reply("❌ Cargo de ping treinos não configurado.", mention_author=False)
+            return
+
+        role = message.guild.get_role(int(cargo_ping))
+        if not role:
+            await message.reply("❌ Cargo não encontrado.", mention_author=False)
+            return
+
+        # Resetar confirmações
+        db.reset_treino_confirmado(server_id)
+
+        # Enviar DM para membros com o cargo
+        embed = discord.Embed(
+            title="🏋️ Treino Registrado!",
+            description="Um novo treino foi registrado. Confirme se você vai participar:",
+            color=discord.Color.blue()
+        )
+        embed.set_footer(text="Use os botões abaixo para confirmar.")
+
+        count = 0
+        for member in message.guild.members:
+            if role in member.roles:
+                try:
+                    view = TreinoConfirmView(server_id, str(member.id))
+                    await member.send(embed=embed, view=view)
+                    count += 1
+                except:
+                    pass  # Ignorar erro de DM
+
+        await message.reply(f"✅ Treino registrado! {count} membros notificados via DM.", mention_author=False)
+
+    # Comando +iniciar treino
+    if message.content.lower() == "+iniciar treino":
+        if not message.author.guild_permissions.manage_roles:
+            await message.reply("❌ Você não tem permissão para iniciar treinos.", mention_author=False)
+            return
+
+        server_id = str(message.guild.id)
+        confirmados = db.get_treino_confirmados(server_id)
+
+        embed = discord.Embed(
+            title="🏋️ Treino Iniciando!",
+            description="O treino está começando agora! Preparem-se.",
+            color=discord.Color.green()
+        )
+
+        count = 0
+        for discord_id in confirmados:
+            member = message.guild.get_member(int(discord_id))
+            if member:
+                try:
+                    await member.send(embed=embed)
+                    count += 1
+                except:
+                    pass
+
+        await message.reply(f"✅ Treino iniciado! {count} membros confirmados notificados.", mention_author=False)
 
     server_id = str(message.guild.id)
     config = db.get_config(server_id)
@@ -453,6 +538,9 @@ async def help(interaction: discord.Interaction):
     embed.add_field(name="/setup_ticket", value="Configura sistema de tickets (staff)", inline=False)
     embed.add_field(name="/setup_logs", value="Configura notificações de eventos (staff)", inline=False)
     embed.add_field(name="/close", value="Fecha ticket (staff)", inline=False)
+    embed.add_field(name="/set_ping_treinos", value="Define cargo para ping de treinos (staff)", inline=False)
+    embed.add_field(name="+registro treino", value="Registra treino e notifica membros (staff)", inline=False)
+    embed.add_field(name="+iniciar treino", value="Inicia treino e notifica confirmados (staff)", inline=False)
     await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="user", description="Ver perfil/XP de um usuário")
@@ -627,19 +715,19 @@ async def setup_logs(interaction: discord.Interaction):
     )
     await send_log_embed(interaction.guild, log_embed)
 
-@bot.tree.command(name="close", description="Fecha o ticket atual (staff)")
-async def close(interaction: discord.Interaction):
-    if not interaction.user.guild_permissions.manage_channels:
+@bot.tree.command(name="set_ping_treinos", description="Define o cargo para ping de treinos (staff)")
+@app_commands.describe(role="Cargo para ping de treinos")
+async def set_ping_treinos(interaction: discord.Interaction, role: discord.Role):
+    if not interaction.user.guild_permissions.manage_roles:
         await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
         return
 
-    if not interaction.channel.name.startswith("ticket-"):
-        await interaction.response.send_message("❌ Este comando só pode ser usado em canais de ticket.", ephemeral=True)
-        return
+    server_id = str(interaction.guild.id)
+    config = db.get_config(server_id)
+    config["cargo_ping_treinos"] = str(role.id)
+    db.save_config(config)
 
-    await interaction.response.send_message("🔒 Ticket fechado!")
-    await asyncio.sleep(3)  # Pequena pausa
-    await interaction.channel.delete()
+    await interaction.response.send_message(f"✅ Cargo de ping treinos definido como {role.mention}!")
 
 def run_bot():
     if DISCORD_BOT_TOKEN:
