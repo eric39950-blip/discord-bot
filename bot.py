@@ -117,6 +117,17 @@ class TicketView(discord.ui.View):
         embed.set_footer(text="Somente você e staff com permissão podem ver este canal.")
 
         await channel.send(embed=embed)
+        await channel.send(
+            "Você deve fazer sua verificação para ter acesso ao nossa União! Aqui está nosso formulário de aplicação; complete ele!\n\n"
+            "Nickname no roblox ( Não Apelido )  : \n"
+            "Usuário do discord ( Não Apelido ) : \n"
+            "Nacionalidade ( de qual País você é ) : \n"
+            "Jura lealdade pela vossa nação? (Sim ou não) : \n"
+            "Entende que sua atividade é crucial na vossa nação? ()\n"
+            "Pegou seus cargos selecionáveis ⁠#cargos-selecionaveis  (Sim)\n"
+            "Pretende focar na nossa nação ( Sim, ou se quer ser mercenário, priorizando outras facções ante a nossa ) ? : \n"
+            "Solicitou no Grupo? https://www.roblox.com/share/g/35338327"
+        )
         await interaction.response.send_message("✅ Ticket criado! Verifique o canal criado.", ephemeral=True)
 
 @bot.event
