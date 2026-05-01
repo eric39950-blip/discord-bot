@@ -27,6 +27,9 @@ class Database:
                     cargo_cabo TEXT,
                     cargo_sargento TEXT,
                     cargo_ping_treinos TEXT,
+                    canal_treinos TEXT,
+                    lembrete_treino_minutos INTEGER DEFAULT 30,
+                    dm_treinos INTEGER DEFAULT 1,
                     xp_soldado INTEGER DEFAULT 100,
                     xp_cabo INTEGER DEFAULT 300,
                     xp_sargento INTEGER DEFAULT 600,
@@ -68,6 +71,20 @@ class Database:
             except sqlite3.OperationalError:
                 pass  # Coluna já existe
 
+            # Adicionar novos campos na config
+            try:
+                cursor.execute("ALTER TABLE configuracoes ADD COLUMN canal_treinos TEXT")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("ALTER TABLE configuracoes ADD COLUMN lembrete_treino_minutos INTEGER DEFAULT 30")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("ALTER TABLE configuracoes ADD COLUMN dm_treinos INTEGER DEFAULT 1")
+            except sqlite3.OperationalError:
+                pass
+
             # Tabela de registros
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS registros (
@@ -78,6 +95,36 @@ class Database:
                     xp INTEGER,
                     motivo TEXT,
                     criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Tabela de treinos
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS treinos (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    server_id TEXT NOT NULL,
+                    criado_por TEXT NOT NULL,
+                    titulo TEXT DEFAULT 'Treino',
+                    descricao TEXT,
+                    horario_inicio TEXT,
+                    canal_id TEXT,
+                    mensagem_id TEXT,
+                    status TEXT DEFAULT 'aberto',
+                    lembrete_enviado INTEGER DEFAULT 0,
+                    criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Tabela de treino_respostas
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS treino_respostas (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    treino_id INTEGER NOT NULL,
+                    server_id TEXT NOT NULL,
+                    discord_id TEXT NOT NULL,
+                    resposta TEXT NOT NULL,
+                    criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(treino_id, discord_id)
                 )
             """)
 
@@ -102,6 +149,9 @@ class Database:
                 "cargo_cabo": None,
                 "cargo_sargento": None,
                 "cargo_ping_treinos": None,
+                "canal_treinos": None,
+                "lembrete_treino_minutos": 30,
+                "dm_treinos": 1,
                 "xp_soldado": 100,
                 "xp_cabo": 300,
                 "xp_sargento": 600,
@@ -252,6 +302,107 @@ class Database:
                 WHERE server_id = ? AND treino_confirmado = 1
             """, (server_id,))
             return [row[0] for row in cursor.fetchall()]
+
+    def create_treino(self, server_id: str, criado_por: str, titulo: str = "Treino", descricao: str = "", horario_inicio: str = "", canal_id: str = "") -> int:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO treinos (server_id, criado_por, titulo, descricao, horario_inicio, canal_id)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (server_id, criado_por, titulo, descricao, horario_inicio, canal_id))
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_treinos(self, server_id: str) -> List[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT t.*, 
+                       COUNT(CASE WHEN tr.resposta = 'vou' THEN 1 END) as vou_count,
+                       COUNT(CASE WHEN tr.resposta = 'talvez' THEN 1 END) as talvez_count,
+                       COUNT(CASE WHEN tr.resposta = 'nao' THEN 1 END) as nao_count
+                FROM treinos t
+                LEFT JOIN treino_respostas tr ON t.id = tr.treino_id
+                WHERE t.server_id = ?
+                GROUP BY t.id
+                ORDER BY t.criado_em DESC
+            """, (server_id,))
+            columns = [desc[0] for desc in cursor.description]
+            return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+    def get_treino(self, treino_id: int) -> Optional[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT t.*, 
+                       COUNT(CASE WHEN tr.resposta = 'vou' THEN 1 END) as vou_count,
+                       COUNT(CASE WHEN tr.resposta = 'talvez' THEN 1 END) as talvez_count,
+                       COUNT(CASE WHEN tr.resposta = 'nao' THEN 1 END) as nao_count
+                FROM treinos t
+                LEFT JOIN treino_respostas tr ON t.id = tr.treino_id
+                WHERE t.id = ?
+                GROUP BY t.id
+            """, (treino_id,))
+            row = cursor.fetchone()
+            if row:
+                columns = [desc[0] for desc in cursor.description]
+                return dict(zip(columns, row))
+            return None
+
+    def get_treino_respostas(self, treino_id: int) -> List[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM treino_respostas
+                WHERE treino_id = ?
+                ORDER BY criado_em DESC
+            """, (treino_id,))
+            columns = [desc[0] for desc in cursor.description]
+            return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+    def set_treino_resposta(self, treino_id: int, server_id: str, discord_id: str, resposta: str):
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO treino_respostas (treino_id, server_id, discord_id, resposta)
+                VALUES (?, ?, ?, ?)
+            """, (treino_id, server_id, discord_id, resposta))
+            conn.commit()
+
+    def cancel_treino(self, treino_id: int):
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE treinos SET status = 'cancelado' WHERE id = ?
+            """, (treino_id,))
+            conn.commit()
+
+    def update_treino_mensagem(self, treino_id: int, mensagem_id: str):
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE treinos SET mensagem_id = ? WHERE id = ?
+            """, (mensagem_id, treino_id))
+            conn.commit()
+
+    def get_treinos_para_lembrete(self) -> List[Dict[str, Any]]:
+        # Buscar treinos abertos com horário próximo e lembrete não enviado
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM treinos
+                WHERE status = 'aberto' AND horario_inicio IS NOT NULL AND lembrete_enviado = 0
+            """)
+            columns = [desc[0] for desc in cursor.description]
+            return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+    def mark_lembrete_enviado(self, treino_id: int):
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE treinos SET lembrete_enviado = 1 WHERE id = ?
+            """, (treino_id,))
+            conn.commit()
 
 # Instância global
 db = Database()
