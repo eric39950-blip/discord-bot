@@ -168,7 +168,27 @@ class TicketView(discord.ui.View):
         form_embed.set_footer(text="⏰ Por favor, responda com atenção a todos os campos")
         
         await channel.send(embed=form_embed)
+        
+        # Adicionar botão para copiar o formulário
+        view = FormularioView()
+        await channel.send("Clique no botão abaixo para copiar o formulário em texto:", view=view)
+        
         await interaction.response.send_message("✅ Ticket criado! Verifique o canal criado.", ephemeral=True)
+
+class FormularioView(discord.ui.View):
+    @discord.ui.button(label="📋 Copiar Formulário", style=discord.ButtonStyle.blurple)
+    async def copiar_formulario(self, interaction: discord.Interaction, button: discord.ui.Button):
+        formulario_texto = """
+🎮 Nickname no Roblox (Não Apelido): 
+👤 Usuário do Discord (Não Apelido): 
+🌍 Nacionalidade (De qual País você é): 
+⚔️ Jura lealdade pela vossa nação? (Sim ou não): 
+💪 Entende que sua atividade é crucial na vossa nação?: 
+🏷️ Pegou seus cargos selecionáveis #cargos-selecionaveis? (Sim): 
+🎯 Pretende focar na nossa nação? (Sim ou Mercenário): 
+👥 Solicitou no Grupo? https://www.roblox.com/share/g/35338327
+        """
+        await interaction.response.send_message(f"```\n{formulario_texto}\n```", ephemeral=True)
 
 @bot.event
 async def on_ready():
