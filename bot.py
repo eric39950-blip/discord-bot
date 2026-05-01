@@ -261,9 +261,17 @@ async def on_message(message):
     if message.author.bot:
         return
 
+    # Se for um canal de ticket e não for do staff, marcar com ✅
+    if message.channel.name.startswith("ticket-"):
+        # Verificar se é o criador do ticket ou um membro comum
+        if not message.author.guild_permissions.manage_channels:
+            try:
+                await message.add_reaction("✅")
+            except:
+                pass  # Ignorar erro de reação
+
     server_id = str(message.guild.id)
     config = db.get_config(server_id)
-
     # Verificar se sistema está ativo
     if config.get("sistema_ativo", 1) == 0:
         return
