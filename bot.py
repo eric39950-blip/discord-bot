@@ -2,7 +2,7 @@ import discord
 from discord.ext import commands, tasks
 import discord.app_commands as app_commands
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from config import DISCORD_BOT_TOKEN
 from database import db
 from discord_api import DiscordAPI
@@ -271,26 +271,35 @@ class FormularioView(discord.ui.View):
         await interaction.response.send_message(f"```\n{formulario_texto}\n```", ephemeral=True)
 
 class TreinoConfirmView(discord.ui.View):
-    def __init__(self, server_id: str, discord_id: str):
+    def __init__(self, treino_id: int, server_id: str, discord_id: str):
         super().__init__(timeout=None)
+        self.treino_id = treino_id
         self.server_id = server_id
         self.discord_id = discord_id
 
-    @discord.ui.button(label="✅ Vou ao Treino", style=discord.ButtonStyle.success)
-    async def confirm_treino(self, interaction: discord.Interaction, button: discord.ui.Button):
-        db.set_treino_confirmado(self.server_id, self.discord_id, True)
-        await interaction.response.send_message("✅ Confirmado! Você será notificado quando o treino começar.", ephemeral=True)
+    @discord.ui.button(label="✅ Vou", style=discord.ButtonStyle.success)
+    async def confirm_vou(self, interaction: discord.Interaction, button: discord.ui.Button):
+        db.set_treino_resposta(self.treino_id, self.server_id, self.discord_id, "vou")
+        await interaction.response.send_message("✅ Resposta registrada: Vou!", ephemeral=True)
 
-    @discord.ui.button(label="❌ Não Vou", style=discord.ButtonStyle.danger)
-    async def decline_treino(self, interaction: discord.Interaction, button: discord.ui.Button):
-        db.set_treino_confirmado(self.server_id, self.discord_id, False)
-        await interaction.response.send_message("❌ Ok, você não será notificado.", ephemeral=True)
+    @discord.ui.button(label="🤔 Talvez", style=discord.ButtonStyle.secondary)
+    async def confirm_talvez(self, interaction: discord.Interaction, button: discord.ui.Button):
+        db.set_treino_resposta(self.treino_id, self.server_id, self.discord_id, "talvez")
+        await interaction.response.send_message("🤔 Resposta registrada: Talvez!", ephemeral=True)
+
+    @discord.ui.button(label="❌ Não vou", style=discord.ButtonStyle.danger)
+    async def confirm_nao(self, interaction: discord.Interaction, button: discord.ui.Button):
+        db.set_treino_resposta(self.treino_id, self.server_id, self.discord_id, "nao")
+        await interaction.response.send_message("❌ Resposta registrada: Não vou!", ephemeral=True)
 
 @bot.event
 async def on_ready():
     print(f"Bot conectado como {bot.user}")
     print(f"Servidores: {len(bot.guilds)}")
     await bot.tree.sync()
+
+    # Iniciar task de lembretes
+    lembrete_task.start()
 
 @bot.event
 async def on_message(message):
@@ -336,46 +345,59 @@ async def on_message(message):
 
         server_id = str(message.guild.id)
         config = db.get_config(server_id)
+    if config.get("sistema_ativo", 1) == 0:
+        return
+
+    # Criar treino
+    treino_id = db.create_treino(server_id, str(message.author.id))
+    treino = db.get_treino(treino_id)
+
+    # Canal para mensagem
+    canal_id = config.get("canal_treinos") or str(message.channel.id)
+    channel = message.guild.get_channel(int(canal_id))
+    if not channel:
+        channel = message.channel
+
+    embed = discord.Embed(
+        title="🏋️ Treino Registrado!",
+        description="Um novo treino foi registrado. Confirme se você vai participar:",
+        color=discord.Color.blue()
+    )
+    embed.set_footer(text="Use os botões abaixo para confirmar presença.")
+
+    view = TreinoConfirmView(treino_id, server_id, "")
+    msg = await channel.send(embed=embed, view=view)
+    db.update_treino_mensagem(treino_id, str(msg.id))
+
+    # Enviar DM se ativado
+    if config.get("dm_treinos", 1) == 1:
         cargo_ping = config.get("cargo_ping_treinos")
-        if not cargo_ping:
+        if cargo_ping:
+            role = message.guild.get_role(int(cargo_ping))
+            if role:
+                embed_dm = discord.Embed(
+                    title="🏋️ Novo Treino!",
+                    description=f"Um treino foi registrado em {message.guild.name}.",
+                    color=discord.Color.blue()
+                )
+                embed_dm.add_field(name="Canal", value=channel.mention, inline=False)
+                embed_dm.set_footer(text="Confirme sua presença clicando nos botões na mensagem do canal.")
+
+                count = 0
+                for member in message.guild.members:
+                    if role in member.roles:
+                        try:
+                            await member.send(embed=embed_dm)
+                            count += 1
+                        except:
+                            pass
+                await message.reply(f"✅ Treino registrado! {count} membros notificados via DM.", mention_author=False)
+            else:
+                await message.reply("❌ Cargo de ping treinos não encontrado.", mention_author=False)
+        else:
             await message.reply("❌ Cargo de ping treinos não configurado.", mention_author=False)
-            return
-
-        role = message.guild.get_role(int(cargo_ping))
-        if not role:
-            await message.reply("❌ Cargo não encontrado.", mention_author=False)
-            return
-
-        # Resetar confirmações
-        db.reset_treino_confirmado(server_id)
-
-        # Enviar DM para membros com o cargo
-        embed = discord.Embed(
-            title="🏋️ Treino Registrado!",
-            description="Um novo treino foi registrado. Confirme se você vai participar:",
-            color=discord.Color.blue()
-        )
-        embed.set_footer(text="Use os botões abaixo para confirmar.")
-
-        count = 0
-        for member in message.guild.members:
-            if role in member.roles:
-                try:
-                    view = TreinoConfirmView(server_id, str(member.id))
-                    await member.send(embed=embed, view=view)
-                    count += 1
-                except:
-                    pass  # Ignorar erro de DM
-
-        await message.reply(f"✅ Treino registrado! {count} membros notificados via DM.", mention_author=False)
-
-    # Comando +iniciar treino
-    if message.content.lower() == "+iniciar treino":
-        if not message.author.guild_permissions.manage_roles:
-            await message.reply("❌ Você não tem permissão para iniciar treinos.", mention_author=False)
-            return
-
-        server_id = str(message.guild.id)
+    else:
+        await message.reply("✅ Treino registrado!", mention_author=False)
         confirmados = db.get_treino_confirmados(server_id)
 
         embed = discord.Embed(
@@ -540,7 +562,6 @@ async def help(interaction: discord.Interaction):
     embed.add_field(name="/close", value="Fecha ticket (staff)", inline=False)
     embed.add_field(name="/set_ping_treinos", value="Define cargo para ping de treinos (staff)", inline=False)
     embed.add_field(name="+registro treino", value="Registra treino e notifica membros (staff)", inline=False)
-    embed.add_field(name="+iniciar treino", value="Inicia treino e notifica confirmados (staff)", inline=False)
     await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="user", description="Ver perfil/XP de um usuário")
@@ -728,6 +749,52 @@ async def set_ping_treinos(interaction: discord.Interaction, role: discord.Role)
     db.save_config(config)
 
     await interaction.response.send_message(f"✅ Cargo de ping treinos definido como {role.mention}!")
+
+@tasks.loop(minutes=1)
+async def lembrete_task():
+    try:
+        treinos = db.get_treinos_para_lembrete()
+        now = datetime.now()
+
+        for treino in treinos:
+            if not treino["horario_inicio"]:
+                continue
+
+            try:
+                horario = datetime.fromisoformat(treino["horario_inicio"])
+            except:
+                continue
+
+            config = db.get_config(treino["server_id"])
+            minutos_antes = config.get("lembrete_treino_minutos", 30)
+            lembrete_time = horario - timedelta(minutes=minutos_antes)
+
+            if now >= lembrete_time:
+                # Enviar lembrete
+                respostas = db.get_treino_respostas(treino["id"])
+                vou_talvez = [r for r in respostas if r["resposta"] in ["vou", "talvez"]]
+
+                embed = discord.Embed(
+                    title="⏰ Lembrete de Treino",
+                    description=f"Lembrete: o treino '{treino['titulo']}' começa em breve.",
+                    color=discord.Color.orange()
+                )
+
+                count = 0
+                for resposta in vou_talvez:
+                    try:
+                        user = await bot.fetch_user(int(resposta["discord_id"]))
+                        await user.send(embed=embed)
+                        count += 1
+                    except:
+                        pass
+
+                # Marcar como enviado
+                db.mark_lembrete_enviado(treino["id"])
+                print(f"Lembrete enviado para {count} usuários do treino {treino['id']}")
+
+    except Exception as e:
+        print(f"Erro no lembrete_task: {e}")
 
 def run_bot():
     if DISCORD_BOT_TOKEN:
