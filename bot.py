@@ -281,16 +281,35 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    # Se for um canal de ticket e não for do staff, responder para avisar que o formulário foi recebido
+    # Se for um canal de ticket e a mensagem vier do dono do ticket, avisar somente se for o formulário
     if message.channel.name.startswith("ticket-"):
-        if not message.author.guild_permissions.manage_channels:
-            try:
-                await message.reply(
-                    "✅ Formulário recebido! Aguarde um membro da equipe revisar sua solicitação.",
-                    mention_author=False
-                )
-            except:
-                pass  # Ignorar erro de resposta
+        try:
+            ticket_owner_id = int(message.channel.name.replace("ticket-", ""))
+        except ValueError:
+            ticket_owner_id = None
+
+        if ticket_owner_id and message.author.id == ticket_owner_id:
+            content = message.content.lower()
+            markers = [
+                "nickname no roblox",
+                "usuário do discord",
+                "nacionalidade",
+                "jura lealdade",
+                "atividade é crucial",
+                "cargos selecionáveis",
+                "pretende focar",
+                "solicitou no grupo"
+            ]
+            found = sum(1 for marker in markers if marker in content)
+
+            if found >= 3:
+                try:
+                    await message.reply(
+                        "✅ Formulário recebido! Aguarde um membro da equipe revisar sua solicitação.",
+                        mention_author=False
+                    )
+                except:
+                    pass  # Ignorar erro de resposta
 
     server_id = str(message.guild.id)
     config = db.get_config(server_id)
