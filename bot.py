@@ -16,13 +16,8 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix=None, intents=intents, help_command=None)
 
-ROLE_HIERARCHY = ["recruta", "soldado", "cabo", "sargento"]
-ROLE_LABELS = {
-    "recruta": "Recruta",
-    "soldado": "Soldado",
-    "cabo": "Cabo",
-    "sargento": "Sargento",
-}
+ROLE_CONFIG_KEYS = ["cargo_recruta", "cargo_soldado", "cargo_cabo", "cargo_sargento"]
+ROLE_SUFFIXES = ["recruta", "soldado", "cabo", "sargento"]
 
 async def send_log_embed(guild: discord.Guild, embed: discord.Embed):
     config = db.get_config(str(guild.id))
@@ -492,12 +487,12 @@ async def on_raw_reaction_add(payload):
         print("Erro em on_raw_reaction_add:", e)
 
 def get_next_lower_role(role_key: str) -> Optional[str]:
-    if role_key not in ROLE_HIERARCHY:
+    if role_key not in ROLE_SUFFIXES:
         return None
-    index = ROLE_HIERARCHY.index(role_key)
+    index = ROLE_SUFFIXES.index(role_key)
     if index <= 0:
         return None
-    return ROLE_HIERARCHY[index - 1]
+    return ROLE_SUFFIXES[index - 1]
 
 async def ensure_role_for_key(guild: discord.Guild, config: dict, role_key: str) -> Optional[discord.Role]:
     role_id = config.get(f"cargo_{role_key}")
@@ -711,16 +706,19 @@ async def hierarchy(interaction: discord.Interaction):
     server_id = str(interaction.guild.id)
     config = db.get_config(server_id)
     lines = []
-    for role_key in ROLE_HIERARCHY:
-        role_id = config.get(f"cargo_{role_key}")
+    for index, key in enumerate(ROLE_CONFIG_KEYS, start=1):
+        role_id = config.get(key)
         if role_id:
             role = interaction.guild.get_role(int(role_id))
-            lines.append(f"{ROLE_LABELS.get(role_key, role_key.title())}: {role.mention if role else 'Cargo não encontrado'}")
+            if role:
+                lines.append(f"{index}. {role.mention}")
+            else:
+                lines.append(f"{index}. Cargo configurado, mas não encontrado no servidor")
         else:
-            lines.append(f"{ROLE_LABELS.get(role_key, role_key.title())}: Não configurado")
+            lines.append(f"{index}. Não configurado")
 
     await interaction.response.send_message(
-        "**Hierarquia de cargos:**\n" + "\n".join(lines),
+        "**Hierarquia de cargos do servidor:**\n" + "\n".join(lines),
         ephemeral=True
     )
 
