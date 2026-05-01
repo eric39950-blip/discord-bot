@@ -281,14 +281,16 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    # Se for um canal de ticket e não for do staff, marcar com ✅
+    # Se for um canal de ticket e não for do staff, responder para avisar que o formulário foi recebido
     if message.channel.name.startswith("ticket-"):
-        # Verificar se é o criador do ticket ou um membro comum
         if not message.author.guild_permissions.manage_channels:
             try:
-                await message.add_reaction("✅")
+                await message.reply(
+                    "✅ Formulário recebido! Aguarde um membro da equipe revisar sua solicitação.",
+                    mention_author=False
+                )
             except:
-                pass  # Ignorar erro de reação
+                pass  # Ignorar erro de resposta
 
     server_id = str(message.guild.id)
     config = db.get_config(server_id)
