@@ -26,6 +26,7 @@ class Database:
                     cargo_soldado TEXT,
                     cargo_cabo TEXT,
                     cargo_sargento TEXT,
+                    cargo_ping_treinos TEXT,
                     xp_soldado INTEGER DEFAULT 100,
                     xp_cabo INTEGER DEFAULT 300,
                     xp_sargento INTEGER DEFAULT 600,
@@ -50,9 +51,22 @@ class Database:
                     xp INTEGER DEFAULT 0,
                     cargo_atual TEXT,
                     ultimo_xp_msg INTEGER DEFAULT 0,
+                    treino_confirmado INTEGER DEFAULT 0,
                     UNIQUE(server_id, discord_id)
                 )
             """)
+
+            # Adicionar coluna treino_confirmado se não existir
+            try:
+                cursor.execute("ALTER TABLE usuarios ADD COLUMN treino_confirmado INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass  # Coluna já existe
+
+            # Adicionar coluna cargo_ping_treinos se não existir
+            try:
+                cursor.execute("ALTER TABLE configuracoes ADD COLUMN cargo_ping_treinos TEXT")
+            except sqlite3.OperationalError:
+                pass  # Coluna já existe
 
             # Tabela de registros
             cursor.execute("""
@@ -87,6 +101,7 @@ class Database:
                 "cargo_soldado": None,
                 "cargo_cabo": None,
                 "cargo_sargento": None,
+                "cargo_ping_treinos": None,
                 "xp_soldado": 100,
                 "xp_cabo": 300,
                 "xp_sargento": 600,
@@ -207,6 +222,36 @@ class Database:
             """, (server_id, limit))
             columns = [desc[0] for desc in cursor.description]
             return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+    def reset_treino_confirmado(self, server_id: str):
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE usuarios
+                SET treino_confirmado = 0
+                WHERE server_id = ?
+            """, (server_id,))
+            conn.commit()
+
+    def set_treino_confirmado(self, server_id: str, discord_id: str, confirmado: bool):
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE usuarios
+                SET treino_confirmado = ?
+                WHERE server_id = ? AND discord_id = ?
+            """, (1 if confirmado else 0, server_id, discord_id))
+            conn.commit()
+
+    def get_treino_confirmados(self, server_id: str) -> List[str]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT discord_id
+                FROM usuarios
+                WHERE server_id = ? AND treino_confirmado = 1
+            """, (server_id,))
+            return [row[0] for row in cursor.fetchall()]
 
 # Instância global
 db = Database()
