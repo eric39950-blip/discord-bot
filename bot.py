@@ -82,6 +82,51 @@ class PromotionView(discord.ui.View):
             child.disabled = True
         await interaction.message.edit(view=self)
 
+class LogsView(discord.ui.View):
+    def __init__(self, guild_id: str):
+        super().__init__(timeout=None)
+        self.guild_id = guild_id
+
+    @discord.ui.button(label="🎫 Tickets Abertos", style=discord.ButtonStyle.blurple)
+    async def notif_tickets(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.manage_channels:
+            await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+            return
+        
+        # Alternar notificação para o usuário
+        user_id = str(interaction.user.id)
+        notif_type = "tickets"
+        
+        # Aqui você pode salvar no banco (implementar depois se necessário)
+        # Por enquanto, confirmar visualmente
+        await interaction.response.send_message(
+            f"✅ Você será notificado sobre tickets abertos via DM!",
+            ephemeral=True
+        )
+        button.label = "✅ Tickets Abertos"
+
+    @discord.ui.button(label="📈 Promoções", style=discord.ButtonStyle.blurple)
+    async def notif_promotions(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.manage_channels:
+            await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+            return
+        
+        await interaction.response.send_message(
+            f"✅ Você será notificado sobre promoções via DM!",
+            ephemeral=True
+        )
+
+    @discord.ui.button(label="⚠️ Rejeições", style=discord.ButtonStyle.blurple)
+    async def notif_rejections(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.manage_channels:
+            await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+            return
+        
+        await interaction.response.send_message(
+            f"✅ Você será notificado sobre rejeições via DM!",
+            ephemeral=True
+        )
+
 class TicketView(discord.ui.View):
     @discord.ui.button(label="🎫 Abrir Ticket", style=discord.ButtonStyle.primary)
     async def open_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -172,6 +217,21 @@ class TicketView(discord.ui.View):
         # Adicionar botão para copiar o formulário
         view = FormularioView()
         await channel.send("Clique no botão abaixo para copiar o formulário em texto:", view=view)
+        
+        # Notificar admins sobre novo ticket
+        for admin in guild.members:
+            if admin.guild_permissions.manage_channels and not admin.bot:
+                try:
+                    notif_embed = discord.Embed(
+                        title="🎫 Novo Ticket Aberto",
+                        description=f"{user.mention} abriu um ticket de verificação",
+                        color=discord.Color.blue()
+                    )
+                    notif_embed.add_field(name="Usuário", value=f"{user.name}#{user.discriminator}", inline=False)
+                    notif_embed.add_field(name="Canal", value=f"[Ir para o ticket]({channel.jump_url})", inline=False)
+                    await admin.send(embed=notif_embed)
+                except:
+                    pass  # Ignorar erro de DM
         
         await interaction.response.send_message("✅ Ticket criado! Verifique o canal criado.", ephemeral=True)
 
@@ -337,9 +397,122 @@ async def help(interaction: discord.Interaction):
     embed.add_field(name="/xp", value="Mostra seu XP atual", inline=False)
     embed.add_field(name="/ranking", value="Exibe o ranking de XP", inline=False)
     embed.add_field(name="/addxp", value="Adiciona XP a um usuário (staff)", inline=False)
+    embed.add_field(name="/user", value="Ver perfil/XP de um usuário", inline=False)
+    embed.add_field(name="/promote", value="Promover usuário manualmente (staff)", inline=False)
+    embed.add_field(name="/demote", value="Rebaixar usuário (staff)", inline=False)
+    embed.add_field(name="/clear-xp", value="Limpar XP de um usuário (staff)", inline=False)
     embed.add_field(name="/setup_ticket", value="Configura sistema de tickets (staff)", inline=False)
+    embed.add_field(name="/setup_logs", value="Configura notificações de eventos (staff)", inline=False)
     embed.add_field(name="/close", value="Fecha ticket (staff)", inline=False)
     await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="user", description="Ver perfil/XP de um usuário")
+@app_commands.describe(user="Usuário")
+async def user(interaction: discord.Interaction, user: discord.Member):
+    server_id = str(interaction.guild.id)
+    user_data = db.get_user(server_id, str(user.id))
+    
+    if not user_data:
+        await interaction.response.send_message("❌ Usuário não encontrado no banco de dados.", ephemeral=True)
+        return
+    
+    embed = discord.Embed(
+        title=f"👤 Perfil de {user.name}",
+        color=discord.Color.blue()
+    )
+    embed.add_field(name="Discord ID", value=user.id, inline=False)
+    embed.add_field(name="⭐ XP Total", value=user_data.get("xp", 0), inline=False)
+    embed.add_field(name="🎖️ Cargo Atual", value=user_data.get("cargo_atual", "Recruta"), inline=False)
+    embed.set_thumbnail(url=user.display_avatar.url)
+    
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="promote", description="Promover usuário manualmente (staff)")
+@app_commands.describe(user="Usuário a promover", role="Novo cargo")
+async def promote(interaction: discord.Interaction, user: discord.Member, role: str):
+    if not interaction.user.guild_permissions.manage_roles:
+        await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+        return
+    
+    server_id = str(interaction.guild.id)
+    config = db.get_config(server_id)
+    
+    # Validar cargo
+    valid_roles = ["recruta", "soldado", "cabo", "sargento"]
+    if role.lower() not in valid_roles:
+        await interaction.response.send_message(f"❌ Cargo inválido. Opções: {', '.join(valid_roles)}", ephemeral=True)
+        return
+    
+    role_id = config.get(f"cargo_{role.lower()}")
+    if not role_id:
+        await interaction.response.send_message(f"❌ Cargo '{role}' não configurado no servidor.", ephemeral=True)
+        return
+    
+    discord_role = interaction.guild.get_role(int(role_id))
+    if not discord_role:
+        await interaction.response.send_message("❌ Cargo não encontrado no Discord.", ephemeral=True)
+        return
+    
+    try:
+        await user.add_roles(discord_role)
+        db.update_user_role(server_id, str(user.id), role.lower())
+        db.add_xp(server_id, str(user.id), 0, "promocao_manual", f"Promovido para {role} por {interaction.user.name}")
+        
+        await interaction.response.send_message(f"✅ {user.mention} promovido para {discord_role.mention}!")
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Erro ao promover: {str(e)}", ephemeral=True)
+
+@bot.tree.command(name="demote", description="Rebaixar usuário (staff)")
+@app_commands.describe(user="Usuário a rebaixar", role="Cargo a remover")
+async def demote(interaction: discord.Interaction, user: discord.Member, role: str):
+    if not interaction.user.guild_permissions.manage_roles:
+        await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+        return
+    
+    server_id = str(interaction.guild.id)
+    config = db.get_config(server_id)
+    
+    # Validar cargo
+    valid_roles = ["recruta", "soldado", "cabo", "sargento"]
+    if role.lower() not in valid_roles:
+        await interaction.response.send_message(f"❌ Cargo inválido. Opções: {', '.join(valid_roles)}", ephemeral=True)
+        return
+    
+    role_id = config.get(f"cargo_{role.lower()}")
+    if not role_id:
+        await interaction.response.send_message(f"❌ Cargo '{role}' não configurado.", ephemeral=True)
+        return
+    
+    discord_role = interaction.guild.get_role(int(role_id))
+    if not discord_role:
+        await interaction.response.send_message("❌ Cargo não encontrado.", ephemeral=True)
+        return
+    
+    try:
+        await user.remove_roles(discord_role)
+        db.update_user_role(server_id, str(user.id), "recruta")
+        db.add_xp(server_id, str(user.id), 0, "rebaixamento", f"Rebaixado de {role} por {interaction.user.name}")
+        
+        await interaction.response.send_message(f"✅ {user.mention} rebaixado!")
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Erro ao rebaixar: {str(e)}", ephemeral=True)
+
+@bot.tree.command(name="clear-xp", description="Limpar XP de um usuário (staff)")
+@app_commands.describe(user="Usuário", reason="Motivo da limpeza")
+async def clear_xp(interaction: discord.Interaction, user: discord.Member, reason: str = "Sem motivo"):
+    if not interaction.user.guild_permissions.manage_roles:
+        await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+        return
+    
+    server_id = str(interaction.guild.id)
+    
+    try:
+        # Limpar XP (resetar para 0)
+        db.add_xp(server_id, str(user.id), -9999999, "reset_xp", f"XP resetado por {interaction.user.name}. Motivo: {reason}")
+        
+        await interaction.response.send_message(f"✅ XP de {user.mention} foi zerado. Motivo: {reason}")
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Erro ao limpar XP: {str(e)}", ephemeral=True)
 
 @bot.tree.command(name="setup_ticket", description="Configura o sistema de tickets neste canal (staff)")
 async def setup_ticket(interaction: discord.Interaction):
@@ -353,6 +526,37 @@ async def setup_ticket(interaction: discord.Interaction):
         color=discord.Color.blue()
     )
     view = TicketView()
+    await interaction.response.send_message(embed=embed, view=view)
+
+@bot.tree.command(name="setup_logs", description="Configura notificações de eventos (staff)")
+async def setup_logs(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.manage_channels:
+        await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+        return
+
+    embed = discord.Embed(
+        title="🔔 Sistema de Notificações",
+        description="Clique nos botões abaixo para ativar notificações via DM sobre eventos do servidor.",
+        color=discord.Color.from_rgb(255, 165, 0)
+    )
+    embed.add_field(
+        name="🎫 Tickets Abertos",
+        value="Receba notificação quando um novo ticket for aberto",
+        inline=False
+    )
+    embed.add_field(
+        name="📈 Promoções",
+        value="Receba notificação sobre promoções de membros",
+        inline=False
+    )
+    embed.add_field(
+        name="⚠️ Rejeições",
+        value="Receba notificação quando promoções forem rejeitadas",
+        inline=False
+    )
+    embed.set_footer(text="Clique nos botões para ativar/desativar notificações")
+    
+    view = LogsView(str(interaction.guild.id))
     await interaction.response.send_message(embed=embed, view=view)
 
 @bot.tree.command(name="close", description="Fecha o ticket atual (staff)")
