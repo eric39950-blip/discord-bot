@@ -303,142 +303,128 @@ async def on_ready():
 
 @bot.event
 async def on_message(message):
-    if message.author.bot:
-        return
+    try:
+        if message.author.bot:
+            return
 
-    # Se for um canal de ticket e a mensagem vier do dono do ticket, avisar somente se for o formulário
-    if message.channel.name.startswith("ticket-"):
-        try:
-            ticket_owner_id = int(message.channel.name.replace("ticket-", ""))
-        except ValueError:
-            ticket_owner_id = None
+        if not message.guild:
+            return
 
-        if ticket_owner_id and message.author.id == ticket_owner_id:
-            content = message.content.lower()
-            markers = [
-                "nickname no roblox",
-                "usuário do discord",
-                "nacionalidade",
-                "jura lealdade",
-                "atividade é crucial",
-                "cargos selecionáveis",
-                "pretende focar",
-                "solicitou no grupo"
-            ]
-            found = sum(1 for marker in marker if marker in content)
+        content = message.content.lower()
 
-            if found >= 3:
-                try:
-                    await message.add_reaction("✅")
-                    await message.reply(
-                        "✅ Formulário recebido! Aguarde um membro da equipe revisar sua solicitação.",
-                        mention_author=False
-                    )
-                except:
-                    pass  # Ignorar erro de resposta
+        # Se for um canal de ticket e a mensagem vier do dono do ticket, avisar somente se for o formulário
+        if message.channel and message.channel.name.startswith("ticket-"):
+            try:
+                ticket_owner_id = int(message.channel.name.replace("ticket-", ""))
+            except ValueError:
+                ticket_owner_id = None
 
-    # Comando +registro treino
-    if message.content.lower() == "+registro treino":
-        if not message.author.guild_permissions.manage_roles:
-            await message.reply("❌ Você não tem permissão para registrar treinos.", mention_author=False)
+            if ticket_owner_id and message.author.id == ticket_owner_id:
+                markers = [
+                    "nickname no roblox",
+                    "usuário do discord",
+                    "nacionalidade",
+                    "jura lealdade",
+                    "atividade é crucial",
+                    "cargos selecionáveis",
+                    "pretende focar",
+                    "solicitou no grupo"
+                ]
+                found = sum(1 for marker in markers if marker in content)
+
+                if found >= 3:
+                    try:
+                        await message.add_reaction("✅")
+                        await message.reply(
+                            "✅ Formulário recebido! Aguarde um membro da equipe revisar sua solicitação.",
+                            mention_author=False
+                        )
+                    except Exception:
+                        pass
+
+        # Comando +registro treino
+        if content == "+registro treino":
+            if not message.author.guild_permissions.manage_roles:
+                await message.reply("❌ Você não tem permissão para registrar treinos.", mention_author=False)
+                return
+
+            server_id = str(message.guild.id)
+            config = db.get_config(server_id)
+            if config.get("sistema_ativo", 1) == 0:
+                return
+
+            treino_id = db.create_treino(server_id, str(message.author.id))
+            treino = db.get_treino(treino_id)
+
+            canal_id = config.get("canal_treinos") or str(message.channel.id)
+            channel = message.guild.get_channel(int(canal_id)) if canal_id else message.channel
+            if not channel:
+                channel = message.channel
+
+            embed = discord.Embed(
+                title="🏋️ Treino Registrado!",
+                description="Um novo treino foi registrado. Confirme se você vai participar:",
+                color=discord.Color.blue()
+            )
+            embed.set_footer(text="Use os botões abaixo para confirmar presença.")
+
+            view = TreinoConfirmView(treino_id, server_id, str(message.author.id))
+            msg = await channel.send(embed=embed, view=view)
+            db.update_treino_mensagem(treino_id, str(msg.id))
+
+            if config.get("dm_treinos", 1) == 1:
+                cargo_ping = config.get("cargo_ping_treinos")
+                if cargo_ping:
+                    role = message.guild.get_role(int(cargo_ping))
+                    if role:
+                        embed_dm = discord.Embed(
+                            title="🏋️ Novo Treino!",
+                            description=f"Um treino foi registrado em {message.guild.name}.",
+                            color=discord.Color.blue()
+                        )
+                        embed_dm.add_field(name="Canal", value=channel.mention, inline=False)
+                        embed_dm.set_footer(text="Confirme sua presença clicando nos botões na mensagem do canal.")
+
+                        count = 0
+                        for member in message.guild.members:
+                            if role in member.roles:
+                                try:
+                                    await member.send(embed=embed_dm)
+                                    count += 1
+                                except Exception:
+                                    pass
+                        await message.reply(f"✅ Treino registrado! {count} membros notificados via DM.", mention_author=False)
+                    else:
+                        await message.reply("❌ Cargo de ping treinos não encontrado.", mention_author=False)
+                else:
+                    await message.reply("❌ Cargo de ping treinos não configurado.", mention_author=False)
+            else:
+                await message.reply("✅ Treino registrado!", mention_author=False)
+
             return
 
         server_id = str(message.guild.id)
         config = db.get_config(server_id)
-    if config.get("sistema_ativo", 1) == 0:
-        return
+        if config.get("sistema_ativo", 1) == 0:
+            return
 
-    # Criar treino
-    treino_id = db.create_treino(server_id, str(message.author.id))
-    treino = db.get_treino(treino_id)
+        user = db.create_or_update_user(server_id, str(message.author.id), str(message.author))
+        cooldown = config.get("cooldown_msg", 60)
+        now = int(datetime.now().timestamp())
+        if now - user.get("ultimo_xp_msg", 0) < cooldown:
+            return
 
-    # Canal para mensagem
-    canal_id = config.get("canal_treinos") or str(message.channel.id)
-    channel = message.guild.get_channel(int(canal_id))
-    if not channel:
-        channel = message.channel
+        xp = config.get("pontos_por_msg", 10)
+        db.add_xp(server_id, str(message.author.id), xp, "mensagem")
+        await check_promotion(message.guild, message.author, config)
 
-    embed = discord.Embed(
-        title="🏋️ Treino Registrado!",
-        description="Um novo treino foi registrado. Confirme se você vai participar:",
-        color=discord.Color.blue()
-    )
-    embed.set_footer(text="Use os botões abaixo para confirmar presença.")
+    except Exception as e:
+        print("Erro no on_message:", e)
 
-    view = TreinoConfirmView(treino_id, server_id, "")
-    msg = await channel.send(embed=embed, view=view)
-    db.update_treino_mensagem(treino_id, str(msg.id))
-
-    # Enviar DM se ativado
-    if config.get("dm_treinos", 1) == 1:
-        cargo_ping = config.get("cargo_ping_treinos")
-        if cargo_ping:
-            role = message.guild.get_role(int(cargo_ping))
-            if role:
-                embed_dm = discord.Embed(
-                    title="🏋️ Novo Treino!",
-                    description=f"Um treino foi registrado em {message.guild.name}.",
-                    color=discord.Color.blue()
-                )
-                embed_dm.add_field(name="Canal", value=channel.mention, inline=False)
-                embed_dm.set_footer(text="Confirme sua presença clicando nos botões na mensagem do canal.")
-
-                count = 0
-                for member in message.guild.members:
-                    if role in member.roles:
-                        try:
-                            await member.send(embed=embed_dm)
-                            count += 1
-                        except:
-                            pass
-                await message.reply(f"✅ Treino registrado! {count} membros notificados via DM.", mention_author=False)
-            else:
-                await message.reply("❌ Cargo de ping treinos não encontrado.", mention_author=False)
-        else:
-            await message.reply("❌ Cargo de ping treinos não configurado.", mention_author=False)
-    else:
-        await message.reply("✅ Treino registrado!", mention_author=False)
-        confirmados = db.get_treino_confirmados(server_id)
-
-        embed = discord.Embed(
-            title="🏋️ Treino Iniciando!",
-            description="O treino está começando agora! Preparem-se.",
-            color=discord.Color.green()
-        )
-
-        count = 0
-        for discord_id in confirmados:
-            member = message.guild.get_member(int(discord_id))
-            if member:
-                try:
-                    await member.send(embed=embed)
-                    count += 1
-                except:
-                    pass
-
-        await message.reply(f"✅ Treino iniciado! {count} membros confirmados notificados.", mention_author=False)
-
-    server_id = str(message.guild.id)
-    config = db.get_config(server_id)
-    # Verificar se sistema está ativo
-    if config.get("sistema_ativo", 1) == 0:
-        return
-
-    # Criar ou atualizar usuário
-    user = db.create_or_update_user(server_id, str(message.author.id), str(message.author))
-
-    # Verificar cooldown
-    cooldown = config.get("cooldown_msg", 60)
-    now = int(datetime.now().timestamp())
-    if now - user.get("ultimo_xp_msg", 0) < cooldown:
-        return
-
-    # Adicionar XP
-    xp = config.get("pontos_por_msg", 10)
-    db.add_xp(server_id, str(message.author.id), xp, "mensagem")
-
-    # Verificar promoção
-    await check_promotion(message.guild, message.author, config)
+    try:
+        await bot.process_commands(message)
+    except Exception as e:
+        print("Erro ao processar comandos:", e)
 
 async def check_promotion(guild: discord.Guild, member: discord.Member, config: dict):
     server_id = str(guild.id)
