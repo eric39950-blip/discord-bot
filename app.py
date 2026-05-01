@@ -9,7 +9,7 @@ app = Flask(__name__)
 app.secret_key = SECRET_KEY
 app.config["SESSION_COOKIE_SECURE"] = True
 app.config["SESSION_COOKIE_HTTPONLY"] = True
-app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SAMESITE"] = "None"
 
 CORS(app, origins=[FRONTEND_URL], supports_credentials=True)
 
@@ -24,7 +24,7 @@ def login_required(f):
 
 @app.route("/api/login_url")
 def api_login_url():
-    return jsonify({"url": Auth.get_login_url()})
+    return redirect(Auth.get_login_url())
 
 @app.route("/callback")
 def callback():
