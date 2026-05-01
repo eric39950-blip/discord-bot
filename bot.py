@@ -84,7 +84,7 @@ class PromotionView(discord.ui.View):
 
 class TicketView(discord.ui.View):
     @discord.ui.button(label="🎫 Abrir Ticket", style=discord.ButtonStyle.primary)
-    async def open_ticket(self, interaction: discord.Interaction):
+    async def open_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
         guild = interaction.guild
         user = interaction.user
 
@@ -129,8 +129,6 @@ async def on_ready():
 async def on_message(message):
     if message.author.bot:
         return
-
-    await bot.process_commands(message)
 
     server_id = str(message.guild.id)
     config = db.get_config(server_id)
