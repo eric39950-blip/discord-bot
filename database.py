@@ -273,6 +273,38 @@ class Database:
             columns = [desc[0] for desc in cursor.description]
             return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
+    def get_stats(self, server_id: str) -> Dict[str, int]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+
+            cursor.execute("SELECT COUNT(*) FROM usuarios WHERE server_id = ?", (server_id,))
+            total_membros = cursor.fetchone()[0] or 0
+
+            cursor.execute(
+                "SELECT COUNT(*) FROM registros WHERE server_id = ? AND tipo = 'promocao'", 
+                (server_id,)
+            )
+            promocoes = cursor.fetchone()[0] or 0
+
+            cursor.execute(
+                "SELECT COUNT(*) FROM registros WHERE server_id = ? AND tipo = 'mensagem' AND DATE(criado_em) = DATE('now')",
+                (server_id,)
+            )
+            mensagens_hoje = cursor.fetchone()[0] or 0
+
+            cursor.execute(
+                "SELECT COALESCE(SUM(xp), 0) FROM registros WHERE server_id = ?",
+                (server_id,)
+            )
+            xp_distribuido = cursor.fetchone()[0] or 0
+
+            return {
+                "total_membros": int(total_membros),
+                "promocoes": int(promocoes),
+                "mensagens_hoje": int(mensagens_hoje),
+                "xp_distribuido": int(xp_distribuido)
+            }
+
     def reset_treino_confirmado(self, server_id: str):
         with self._get_connection() as conn:
             cursor = conn.cursor()
