@@ -4,7 +4,7 @@ import discord.app_commands as app_commands
 import asyncio
 from datetime import datetime, timedelta
 from typing import Optional
-from config import DISCORD_BOT_TOKEN
+from config import DISCORD_BOT_TOKEN, DB_PATH
 from database import db
 from discord_api import DiscordAPI
 
@@ -53,12 +53,14 @@ class PromotionView(discord.ui.View):
             await interaction.response.send_message("❌ Usuário não encontrado no servidor.", ephemeral=True)
             return
 
-        config = db.get_config(self.server_id)
-        role_id = config.get(f"cargo_{self.new_role}")
-        if not role_id:
+        # Get role_id from patentes
+        patentes = db.get_patentes(self.server_id)
+        patente = next((p for p in patentes if p["nome"].lower() == self.new_role.lower()), None)
+        if not patente or not patente.get("role_id"):
             await interaction.response.send_message("❌ Cargo de promoção não configurado.", ephemeral=True)
             return
 
+        role_id = patente["role_id"]
         role = guild.get_role(int(role_id))
         if not role:
             await interaction.response.send_message("❌ Cargo não encontrado.", ephemeral=True)
@@ -323,11 +325,109 @@ class TreinoConfirmView(discord.ui.View):
 async def on_ready():
     print(f"Bot conectado como {bot.user}")
     print(f"Servidores: {len(bot.guilds)}")
+    
+    # Debug prints for each server
+    for guild in bot.guilds:
+        server_id = str(guild.id)
+        print(f"DATABASE_PATH: {DB_PATH}")
+        config = db.get_config(server_id)
+        print(f"Config carregada para {guild.name}: {config}")
+        
+        # Ensure default patentes and canais
+        db.ensure_default_patentes(server_id)
+        db.ensure_default_canais(server_id)
+        
+        patentes = db.get_patentes(server_id)
+        print(f"Patentes carregadas para {guild.name}: {patentes}")
+        canais = db.get_config_canais(server_id)
+        print(f"Canais configurados para {guild.name}: {canais}")
+    
     await bot.tree.sync()
 
     # Iniciar task de lembretes e monitor de inatividade
     lembrete_task.start()
     inactivity_task.start()
+
+    # Resend setup embeds if configured channels exist
+    for guild in bot.guilds:
+        server_id = str(guild.id)
+        config = db.get_config(server_id)
+        
+        # Resend ticket setup if canal_avaliacao is configured
+        if config.get("canal_avaliacao"):
+            try:
+                channel = guild.get_channel(int(config["canal_avaliacao"]))
+                if channel:
+                    embed = discord.Embed(
+                        title="🎫 Atendimento de Suporte",
+                        description=(
+                            "Abra um ticket para registrar sua solicitação de verificação ou suporte. "
+                            "A equipe irá analisar sua solicitação neste canal com atenção e retornará o mais breve possível."
+                        ),
+                        color=discord.Color.blue()
+                    )
+                    embed.add_field(
+                        name="Como funciona",
+                        value=(
+                            "1. Clique em 'Abrir Ticket' para criar um canal privado.\n"
+                            "2. Responda ao formulário de verificação com informações verdadeiras.\n"
+                            "3. A equipe irá revisar sua solicitação. Staff usará reações para aprovar ou rejeitar."
+                        ),
+                        inline=False
+                    )
+                    embed.add_field(
+                        name="Avaliação",
+                        value=(
+                            "✅ Aprovar — o usuário receberá o cargo configurado de verificado.\n"
+                            "❌ Rejeitar — o usuário não receberá o cargo e será informado da recusa."
+                        ),
+                        inline=False
+                    )
+                    embed.set_footer(text="Apenas staff autorizado pode abrir, analisar e responder tickets.")
+
+                    view = TicketView()
+                    await channel.send(embed=embed, view=view)
+            except Exception as e:
+                print(f"Erro ao reenviar setup de tickets para {guild.name}: {e}")
+        
+        # Resend logs setup if canal_logs is configured
+        if config.get("canal_logs"):
+            try:
+                channel = guild.get_channel(int(config["canal_logs"]))
+                if channel:
+                    embed = discord.Embed(
+                        title="🔔 Sistema de Notificações",
+                        description="Clique nos botões abaixo para ativar notificações via DM sobre eventos do servidor.",
+                        color=discord.Color.from_rgb(255, 165, 0)
+                    )
+                    embed.add_field(
+                        name="🎫 Tickets Abertos",
+                        value="Receba notificação quando um novo ticket for aberto",
+                        inline=False
+                    )
+                    embed.add_field(
+                        name="📈 Promoções",
+                        value="Receba notificação sobre promoções de membros",
+                        inline=False
+                    )
+                    embed.add_field(
+                        name="⚠️ Rejeições",
+                        value="Receba notificação quando promoções forem rejeitadas",
+                        inline=False
+                    )
+                    embed.set_footer(text="Clique nos botões para ativar/desativar notificações")
+                    
+                    embed.add_field(
+                        name="📍 Canal de Logs",
+                        value=f"Este canal foi definido como canal de logs para o servidor.",
+                        inline=False
+                    )
+                    embed.set_footer(text="Todos os eventos vão ser enviados aqui quando acontecerem.")
+
+                    view = LogsView(server_id)
+                    await channel.send(embed=embed, view=view)
+            except Exception as e:
+                print(f"Erro ao reenviar setup de logs para {guild.name}: {e}")
 
 @bot.event
 async def on_message(message):
@@ -628,32 +728,36 @@ async def check_promotion(guild: discord.Guild, member: discord.Member, config: 
     auto_promover = config.get("auto_promover", 1) == 1
     usar_dm = config.get("usar_dm", 1) == 1
 
-    new_role = None
-    xp_required = 0
-
-    if xp >= config.get("xp_sargento", 600) and user.get("cargo_atual") != "sargento":
-        new_role = "sargento"
-        xp_required = config.get("xp_sargento", 600)
-    elif xp >= config.get("xp_cabo", 300) and user.get("cargo_atual") != "cabo":
-        new_role = "cabo"
-        xp_required = config.get("xp_cabo", 300)
-    elif xp >= config.get("xp_soldado", 100) and user.get("cargo_atual") != "soldado":
-        new_role = "soldado"
-        xp_required = config.get("xp_soldado", 100)
-
-    if not new_role:
+    # Get patentes ordered by XP required
+    patentes = db.get_patentes_ordenadas_por_xp(server_id)
+    if not patentes:
         return
+
+    current_xp = user.get("cargo_atual", "")
+    new_patente = None
+
+    # Find the highest rank the user qualifies for
+    for patente in patentes:
+        if xp >= patente["xp_necessario"] and current_xp != patente["nome"].lower():
+            new_patente = patente
+            break
+
+    if not new_patente:
+        return
+
+    new_role_name = new_patente["nome"].lower()
+    xp_required = new_patente["xp_necessario"]
 
     if auto_promover:
         # Promoção automática
-        role_id = config.get(f"cargo_{new_role}")
+        role_id = new_patente.get("role_id")
         if role_id:
             role = guild.get_role(int(role_id))
             if role:
                 try:
                     await member.add_roles(role)
-                    db.update_user_role(server_id, str(member.id), new_role)
-                    db.add_xp(server_id, str(member.id), 0, "promocao", f"Auto-promovido para {new_role}")
+                    db.update_user_role(server_id, str(member.id), new_role_name)
+                    db.add_xp(server_id, str(member.id), 0, "promocao", f"Auto-promovido para {new_role_name}")
 
                     if usar_dm:
                         try:
@@ -674,12 +778,12 @@ async def check_promotion(guild: discord.Guild, member: discord.Member, config: 
                     color=discord.Color.blue()
                 )
                 embed.add_field(name="👤 Usuário", value=member.mention, inline=True)
-                embed.add_field(name="🎯 Cargo Solicitado", value=new_role.title(), inline=True)
+                embed.add_field(name="🎯 Cargo Solicitado", value=new_role_name.title(), inline=True)
                 embed.add_field(name="⭐ XP Atual", value=f"{xp} XP", inline=True)
                 embed.add_field(name="📊 XP Necessário", value=f"{xp_required} XP", inline=True)
                 embed.set_footer(text="Staff, use os botões abaixo para aprovar ou rejeitar.")
 
-                view = PromotionView(server_id, str(member.id), new_role, xp_required)
+                view = PromotionView(server_id, str(member.id), new_role_name, xp_required)
                 await channel.send(embed=embed, view=view)
 
 @bot.tree.command(name="xp", description="Mostra seu XP atual")
@@ -794,19 +898,15 @@ async def promote(interaction: discord.Interaction, user: discord.Member, role: 
         return
     
     server_id = str(interaction.guild.id)
-    config = db.get_config(server_id)
     
-    # Validar cargo
-    valid_roles = ["recruta", "soldado", "cabo", "sargento"]
-    if role.lower() not in valid_roles:
-        await interaction.response.send_message(f"❌ Cargo inválido. Opções: {', '.join(valid_roles)}", ephemeral=True)
-        return
-    
-    role_id = config.get(f"cargo_{role.lower()}")
-    if not role_id:
+    # Get patente by name
+    patentes = db.get_patentes(server_id)
+    patente = next((p for p in patentes if p["nome"].lower() == role.lower()), None)
+    if not patente or not patente.get("role_id"):
         await interaction.response.send_message(f"❌ Cargo '{role}' não configurado no servidor.", ephemeral=True)
         return
     
+    role_id = patente["role_id"]
     discord_role = interaction.guild.get_role(int(role_id))
     if not discord_role:
         await interaction.response.send_message("❌ Cargo não encontrado no Discord.", ephemeral=True)
@@ -829,19 +929,15 @@ async def demote(interaction: discord.Interaction, user: discord.Member, role: s
         return
     
     server_id = str(interaction.guild.id)
-    config = db.get_config(server_id)
     
-    # Validar cargo
-    valid_roles = ["recruta", "soldado", "cabo", "sargento"]
-    if role.lower() not in valid_roles:
-        await interaction.response.send_message(f"❌ Cargo inválido. Opções: {', '.join(valid_roles)}", ephemeral=True)
-        return
-    
-    role_id = config.get(f"cargo_{role.lower()}")
-    if not role_id:
+    # Get patente by name
+    patentes = db.get_patentes(server_id)
+    patente = next((p for p in patentes if p["nome"].lower() == role.lower()), None)
+    if not patente or not patente.get("role_id"):
         await interaction.response.send_message(f"❌ Cargo '{role}' não configurado.", ephemeral=True)
         return
     
+    role_id = patente["role_id"]
     discord_role = interaction.guild.get_role(int(role_id))
     if not discord_role:
         await interaction.response.send_message("❌ Cargo não encontrado.", ephemeral=True)
