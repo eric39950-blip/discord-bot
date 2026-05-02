@@ -62,3 +62,60 @@ class DiscordAPI:
         # Verificar se o bot está no servidor
         guild = DiscordAPI._make_bot_request(f"/guilds/{guild_id}")
         return guild is not None
+
+    @staticmethod
+    def create_role(guild_id: str, role_name: str) -> Optional[Dict[str, Any]]:
+        """Cria um novo cargo no servidor"""
+        payload = {
+            "name": role_name,
+            "permissions": 0,
+            "hoist": False,
+            "mentionable": False
+        }
+        return DiscordAPI._make_bot_request(f"/guilds/{guild_id}/roles", method="POST", json=payload)
+
+    @staticmethod
+    def ensure_discord_role(guild_id: str, role_name: str) -> Dict[str, Any]:
+        """
+        Garante que um cargo existe no servidor.
+        Se existir, retorna seus dados.
+        Se não existir, cria e retorna os dados.
+        
+        Retorna:
+        {
+            "id": "role_id",
+            "name": "role_name",
+            "created": True/False (True se foi criado nesta chamada)
+        }
+        
+        Ou em caso de erro:
+        {
+            "error": "error_type",
+            "message": "error_message"
+        }
+        """
+        # Verificar se o bot está no servidor
+        if not DiscordAPI.is_bot_in_guild(guild_id):
+            return {"error": "bot_not_in_server", "message": "Bot não está no servidor"}
+
+        # Procurar cargo existente com esse nome
+        roles = DiscordAPI.get_guild_roles(guild_id)
+        existing_role = next((r for r in roles if r.get("name") == role_name), None)
+        
+        if existing_role:
+            return {
+                "id": str(existing_role["id"]),
+                "name": existing_role["name"],
+                "created": False
+            }
+
+        # Tentar criar novo cargo
+        new_role = DiscordAPI.create_role(guild_id, role_name)
+        if not new_role:
+            return {"error": "failed_to_create_role", "message": "Erro ao criar cargo no Discord"}
+
+        return {
+            "id": str(new_role["id"]),
+            "name": new_role["name"],
+            "created": True
+        }
