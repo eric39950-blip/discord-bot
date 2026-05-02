@@ -3,6 +3,8 @@ from datetime import datetime
 from typing import List, Dict, Optional, Any
 from config import DB_PATH
 from discord_api import DiscordAPI
+import json
+import os
 
 class Database:
     def __init__(self, db_path: str = str(DB_PATH)):
@@ -134,6 +136,14 @@ class Database:
                 cursor.execute("ALTER TABLE configuracoes ADD COLUMN dm_treinos INTEGER DEFAULT 1")
             except sqlite3.OperationalError:
                 pass
+            try:
+                cursor.execute("ALTER TABLE treino_respostas ADD COLUMN participou INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("ALTER TABLE treino_respostas ADD COLUMN pontos_concedidos INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass
 
             # Tabela de registros
             cursor.execute("""
@@ -175,6 +185,8 @@ class Database:
                     server_id TEXT NOT NULL,
                     discord_id TEXT NOT NULL,
                     resposta TEXT NOT NULL,
+                    participou INTEGER DEFAULT 0,
+                    pontos_concedidos INTEGER DEFAULT 0,
                     criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(treino_id, discord_id)
                 )
@@ -211,6 +223,18 @@ class Database:
 
             conn.commit()
 
+    def _load_backup_config(self, server_id: str) -> Optional[Dict[str, Any]]:
+        backup_file = os.path.join(os.path.dirname(self.db_path), "backups", f"config_{server_id}.json")
+        if os.path.exists(backup_file):
+            try:
+                with open(backup_file, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                    print(f"Config carregada do backup para server_id: {server_id}")
+                    return config
+            except Exception as e:
+                print(f"Erro ao carregar backup: {e}")
+        return None
+
     def get_config(self, server_id: str) -> Dict[str, Any]:
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -219,6 +243,12 @@ class Database:
             if row:
                 columns = [desc[0] for desc in cursor.description]
                 return dict(zip(columns, row))
+            # Tentar carregar do backup
+            backup_config = self._load_backup_config(server_id)
+            if backup_config:
+                # Salvar no banco para restaurar
+                self.save_config(backup_config)
+                return backup_config
             # Config padrão
             return {
                 "server_id": server_id,
@@ -249,35 +279,52 @@ class Database:
                 "usar_ia": 0
             }
 
+    def _backup_config(self, config: Dict[str, Any]):
+        backup_dir = os.path.join(os.path.dirname(self.db_path), "backups")
+        os.makedirs(backup_dir, exist_ok=True)
+        backup_file = os.path.join(backup_dir, f"config_{config['server_id']}.json")
+        try:
+            with open(backup_file, 'w', encoding='utf-8') as f:
+                json.dump(config, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            print(f"Erro ao fazer backup da config: {e}")
+
     def save_config(self, config: Dict[str, Any]) -> bool:
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT OR REPLACE INTO configuracoes (
-                    server_id, canal_avaliacao, canal_registro, canal_logs,
-                    cargo_recruta, cargo_soldado, cargo_cabo, cargo_sargento,
-                    cargo_ping_treinos, canal_treinos, canal_inatividade,
-                    pontos_por_treino, cargo_verificado,
-                    lembrete_treino_minutos, dm_treinos,
-                    xp_soldado, xp_cabo, xp_sargento, pontos_por_msg,
-                    pontos_por_registro, cooldown_msg, auto_promover,
-                    precisa_aprovacao, sistema_ativo, usar_dm, usar_ia
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                config["server_id"], config.get("canal_avaliacao"), config.get("canal_registro"),
-                config.get("canal_logs"), config.get("cargo_recruta"), config.get("cargo_soldado"),
-                config.get("cargo_cabo"), config.get("cargo_sargento"), config.get("cargo_ping_treinos"),
-                config.get("canal_treinos"), config.get("canal_inatividade"),
-                config.get("pontos_por_treino", 2), config.get("cargo_verificado"),
-                config.get("lembrete_treino_minutos", 30), config.get("dm_treinos", 1),
-                config.get("xp_soldado", 100), config.get("xp_cabo", 300), config.get("xp_sargento", 600),
-                config.get("pontos_por_msg", 10), config.get("pontos_por_registro", 50),
-                config.get("cooldown_msg", 60), config.get("auto_promover", 1),
-                config.get("precisa_aprovacao", 1), config.get("sistema_ativo", 1), config.get("usar_dm", 1),
-                config.get("usar_ia", 0)
-            ))
-            conn.commit()
-            return True
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR REPLACE INTO configuracoes (
+                        server_id, canal_avaliacao, canal_registro, canal_logs,
+                        cargo_recruta, cargo_soldado, cargo_cabo, cargo_sargento,
+                        cargo_ping_treinos, canal_treinos, canal_inatividade,
+                        pontos_por_treino, cargo_verificado,
+                        lembrete_treino_minutos, dm_treinos,
+                        xp_soldado, xp_cabo, xp_sargento, pontos_por_msg,
+                        pontos_por_registro, cooldown_msg, auto_promover,
+                        precisa_aprovacao, sistema_ativo, usar_dm, usar_ia
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    config["server_id"], config.get("canal_avaliacao"), config.get("canal_registro"),
+                    config.get("canal_logs"), config.get("cargo_recruta"), config.get("cargo_soldado"),
+                    config.get("cargo_cabo"), config.get("cargo_sargento"), config.get("cargo_ping_treinos"),
+                    config.get("canal_treinos"), config.get("canal_inatividade"),
+                    config.get("pontos_por_treino", 2), config.get("cargo_verificado"),
+                    config.get("lembrete_treino_minutos", 30), config.get("dm_treinos", 1),
+                    config.get("xp_soldado", 100), config.get("xp_cabo", 300), config.get("xp_sargento", 600),
+                    config.get("pontos_por_msg", 10), config.get("pontos_por_registro", 50),
+                    config.get("cooldown_msg", 60), config.get("auto_promover", 1),
+                    config.get("precisa_aprovacao", 1), config.get("sistema_ativo", 1), config.get("usar_dm", 1),
+                    config.get("usar_ia", 0)
+                ))
+                conn.commit()
+                # Fazer backup da config
+                self._backup_config(config)
+                print(f"Config salva e backup feito para server_id: {config['server_id']}")
+                return True
+        except Exception as e:
+            print(f"Erro ao salvar config: {e}")
+            return False
 
     def get_user(self, server_id: str, discord_id: str) -> Optional[Dict[str, Any]]:
         with self._get_connection() as conn:
@@ -581,16 +628,35 @@ class Database:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT OR REPLACE INTO treino_respostas (treino_id, server_id, discord_id, resposta)
-                VALUES (?, ?, ?, ?)
+                INSERT OR REPLACE INTO treino_respostas (treino_id, server_id, discord_id, resposta, participou, pontos_concedidos)
+                VALUES (?, ?, ?, ?, 0, 0)
             """, (treino_id, server_id, discord_id, resposta))
             conn.commit()
+
+    def mark_treino_participacao(self, treino_id: int, discord_id: str, participou: bool, pontos_concedidos: int):
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE treino_respostas
+                SET participou = ?, pontos_concedidos = ?
+                WHERE treino_id = ? AND discord_id = ?
+            """, (1 if participou else 0, pontos_concedidos, treino_id, discord_id))
+            conn.commit()
+            return cursor.rowcount > 0
 
     def cancel_treino(self, treino_id: int):
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 UPDATE treinos SET status = 'cancelado' WHERE id = ?
+            """, (treino_id,))
+            conn.commit()
+
+    def finalize_treino(self, treino_id: int):
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE treinos SET status = 'finalizado' WHERE id = ?
             """, (treino_id,))
             conn.commit()
 
