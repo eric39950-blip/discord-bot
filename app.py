@@ -22,6 +22,24 @@ def login_required(f):
     wrapper.__name__ = f.__name__
     return wrapper
 
+
+def require_server_admin(server_id):
+    user = Auth.get_current_user()
+    if not user:
+        authorized, reason = False, "not_logged_in"
+    else:
+        authorized, reason = Auth.can_manage_server(server_id)
+
+    print("AUTH DEBUG", {
+        "server_id": server_id,
+        "user_id": user.get("id") if user else None,
+        "admin_guild_ids": session.get("admin_guild_ids"),
+        "authorized": authorized,
+        "reason": reason
+    })
+
+    return authorized, reason
+
 @app.route("/api/login_url")
 def api_login_url():
     return redirect(Auth.get_login_url())
@@ -63,7 +81,7 @@ def api_servers():
 @app.route("/api/server/<server_id>/authorize")
 @login_required
 def api_server_authorize(server_id):
-    authorized, reason = Auth.can_manage_server(server_id)
+    authorized, reason = require_server_admin(server_id)
     return jsonify({
         "server_id": server_id,
         "authorized": authorized,
@@ -73,8 +91,7 @@ def api_server_authorize(server_id):
 @app.route("/api/server/<server_id>/channels")
 @login_required
 def api_server_channels(server_id):
-    authorized, reason = Auth.can_manage_server(server_id)
-    print("AUTH CHECK:", server_id, authorized, reason)
+    authorized, reason = require_server_admin(server_id)
     if not authorized:
         return jsonify({"error": "unauthorized", "reason": reason}), 403
 
@@ -84,8 +101,7 @@ def api_server_channels(server_id):
 @app.route("/api/server/<server_id>/roles")
 @login_required
 def api_server_roles(server_id):
-    authorized, reason = Auth.can_manage_server(server_id)
-    print("AUTH CHECK:", server_id, authorized, reason)
+    authorized, reason = require_server_admin(server_id)
     if not authorized:
         return jsonify({"error": "unauthorized", "reason": reason}), 403
 
@@ -99,8 +115,7 @@ def api_get_config():
     if not server_id:
         return jsonify({"error": "server_id_required"}), 400
 
-    authorized, reason = Auth.can_manage_server(server_id)
-    print("AUTH CHECK:", server_id, authorized, reason)
+    authorized, reason = require_server_admin(server_id)
     if not authorized:
         return jsonify({"error": "unauthorized", "reason": reason}), 403
 
@@ -114,8 +129,7 @@ def api_get_config_canais():
     if not server_id:
         return jsonify({"error": "server_id_required"}), 400
 
-    authorized, reason = Auth.can_manage_server(server_id)
-    print("AUTH CHECK:", server_id, authorized, reason)
+    authorized, reason = require_server_admin(server_id)
     if not authorized:
         return jsonify({"error": "unauthorized", "reason": reason}), 403
 
@@ -131,8 +145,7 @@ def api_create_config_canal():
         return jsonify({"error": "invalid_data", "message": "server_id, nome e tipo são obrigatórios"}), 400
 
     server_id = data["server_id"]
-    authorized, reason = Auth.can_manage_server(server_id)
-    print("AUTH CHECK:", server_id, authorized, reason)
+    authorized, reason = require_server_admin(server_id)
     if not authorized:
         return jsonify({"error": "unauthorized", "reason": reason}), 403
 
@@ -154,8 +167,7 @@ def api_update_config_canal(canal_id):
         return jsonify({"error": "invalid_data", "message": "server_id é obrigatório"}), 400
 
     server_id = data["server_id"]
-    authorized, reason = Auth.can_manage_server(server_id)
-    print("AUTH CHECK:", server_id, authorized, reason)
+    authorized, reason = require_server_admin(server_id)
     if not authorized:
         return jsonify({"error": "unauthorized", "reason": reason}), 403
 
@@ -172,8 +184,7 @@ def api_delete_config_canal(canal_id):
     if not server_id:
         return jsonify({"error": "server_id_required"}), 400
 
-    authorized, reason = Auth.can_manage_server(server_id)
-    print("AUTH CHECK:", server_id, authorized, reason)
+    authorized, reason = require_server_admin(server_id)
     if not authorized:
         return jsonify({"error": "unauthorized", "reason": reason}), 403
 
@@ -192,8 +203,7 @@ def api_get_patentes():
     if not server_id:
         return jsonify({"error": "server_id_required"}), 400
 
-    authorized, reason = Auth.can_manage_server(server_id)
-    print("AUTH CHECK:", server_id, authorized, reason)
+    authorized, reason = require_server_admin(server_id)
     if not authorized:
         return jsonify({"error": "unauthorized", "reason": reason}), 403
 
@@ -209,8 +219,7 @@ def api_create_patente():
         return jsonify({"error": "invalid_data", "message": "server_id e nome são obrigatórios"}), 400
 
     server_id = data["server_id"]
-    authorized, reason = Auth.can_manage_server(server_id)
-    print("AUTH CHECK:", server_id, authorized, reason)
+    authorized, reason = require_server_admin(server_id)
     if not authorized:
         return jsonify({"error": "unauthorized", "reason": reason}), 403
 
@@ -230,8 +239,7 @@ def api_update_patente(patente_id):
         return jsonify({"error": "invalid_data", "message": "server_id é obrigatório"}), 400
 
     server_id = data["server_id"]
-    authorized, reason = Auth.can_manage_server(server_id)
-    print("AUTH CHECK:", server_id, authorized, reason)
+    authorized, reason = require_server_admin(server_id)
     if not authorized:
         return jsonify({"error": "unauthorized", "reason": reason}), 403
 
@@ -248,8 +256,9 @@ def api_delete_patente(patente_id):
     if not server_id:
         return jsonify({"error": "server_id_required"}), 400
 
-    authorized, reason = Auth.can_manage_server(server_id)
-    print("AUTH CHECK:", server_id, authorized, reason)
+    authorized, reason = require_server_admin(server_id)
+    if not authorized:
+        return jsonify({"error": "unauthorized", "reason": reason}), 403
     if not authorized:
         return jsonify({"error": "unauthorized", "reason": reason}), 403
 
@@ -269,8 +278,9 @@ def api_save_config():
         return jsonify({"error": "invalid_data"}), 400
 
     server_id = data["server_id"]
-    authorized, reason = Auth.can_manage_server(server_id)
-    print("AUTH CHECK:", server_id, authorized, reason)
+    authorized, reason = require_server_admin(server_id)
+    if not authorized:
+        return jsonify({"error": "unauthorized", "reason": reason}), 403
     if not authorized:
         return jsonify({"error": "unauthorized", "reason": reason}), 403
 
@@ -288,7 +298,7 @@ def api_ranking():
     if not server_id:
         return jsonify({"error": "server_id_required"}), 400
 
-    authorized, _ = Auth.can_manage_server(server_id)
+    authorized, _ = require_server_admin(server_id)
     if not authorized:
         return jsonify({"error": "unauthorized"}), 403
 
@@ -306,7 +316,7 @@ def api_stats():
     if not server_id:
         return jsonify({"error": "server_id_required"}), 400
 
-    authorized, _ = Auth.can_manage_server(server_id)
+    authorized, _ = require_server_admin(server_id)
     if not authorized:
         return jsonify({"error": "unauthorized"}), 403
 
@@ -324,7 +334,7 @@ def api_add_xp(discord_id):
     if not server_id or xp <= 0:
         return jsonify({"error": "invalid_data"}), 400
 
-    authorized, _ = Auth.can_manage_server(server_id)
+    authorized, _ = require_server_admin(server_id)
     if not authorized:
         return jsonify({"error": "unauthorized"}), 403
 
@@ -346,8 +356,7 @@ def api_get_treinos():
     if not server_id:
         return jsonify({"error": "server_id_required"}), 400
 
-    authorized, reason = Auth.can_manage_server(server_id)
-    print("AUTH CHECK:", server_id, authorized, reason)
+    authorized, reason = require_server_admin(server_id)
     if not authorized:
         return jsonify({"error": "unauthorized", "reason": reason}), 403
 
@@ -362,7 +371,7 @@ def api_create_treino():
         return jsonify({"error": "invalid_data"}), 400
 
     server_id = data["server_id"]
-    authorized, _ = Auth.can_manage_server(server_id)
+    authorized, _ = require_server_admin(server_id)
     if not authorized:
         return jsonify({"error": "unauthorized"}), 403
 
@@ -383,7 +392,7 @@ def api_get_treino(treino_id):
     if not treino:
         return jsonify({"error": "treino_not_found"}), 404
 
-    authorized, _ = Auth.can_manage_server(treino["server_id"])
+    authorized, _ = require_server_admin(treino["server_id"])
     if not authorized:
         return jsonify({"error": "unauthorized"}), 403
 
@@ -397,7 +406,7 @@ def api_cancel_treino(treino_id):
     if not treino:
         return jsonify({"error": "treino_not_found"}), 404
 
-    authorized, _ = Auth.can_manage_server(treino["server_id"])
+    authorized, _ = require_server_admin(treino["server_id"])
     if not authorized:
         return jsonify({"error": "unauthorized"}), 403
 
@@ -411,7 +420,7 @@ def api_notify_treino(treino_id):
     if not treino:
         return jsonify({"error": "treino_not_found"}), 404
 
-    authorized, _ = Auth.can_manage_server(treino["server_id"])
+    authorized, _ = require_server_admin(treino["server_id"])
     if not authorized:
         return jsonify({"error": "unauthorized"}), 403
 
@@ -435,7 +444,7 @@ def api_set_treino_resposta(treino_id):
         return jsonify({"error": "treino_not_found"}), 404
 
     server_id = treino["server_id"]
-    authorized, _ = Auth.can_manage_server(server_id)
+    authorized, _ = require_server_admin(server_id)
     if not authorized:
         return jsonify({"error": "unauthorized"}), 403
 
