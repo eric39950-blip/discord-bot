@@ -32,6 +32,7 @@ class Database:
                     cargo_ping_treinos TEXT,
                     canal_treinos TEXT,
                     canal_inatividade TEXT,
+                    canal_logs_treino TEXT,
                     pontos_por_treino INTEGER DEFAULT 2,
                     cargo_verificado TEXT,
                     lembrete_treino_minutos INTEGER DEFAULT 30,
@@ -110,6 +111,10 @@ class Database:
                 pass
             try:
                 cursor.execute("ALTER TABLE configuracoes ADD COLUMN canal_inatividade TEXT")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("ALTER TABLE configuracoes ADD COLUMN canal_logs_treino TEXT")
             except sqlite3.OperationalError:
                 pass
             try:
@@ -262,6 +267,7 @@ class Database:
                 "cargo_ping_treinos": None,
                 "canal_treinos": None,
                 "canal_inatividade": None,
+                "canal_logs_treino": None,
                 "pontos_por_treino": 2,
                 "cargo_verificado": None,
                 "lembrete_treino_minutos": 30,
@@ -297,7 +303,7 @@ class Database:
                     INSERT OR REPLACE INTO configuracoes (
                         server_id, canal_avaliacao, canal_registro, canal_logs,
                         cargo_recruta, cargo_soldado, cargo_cabo, cargo_sargento,
-                        cargo_ping_treinos, canal_treinos, canal_inatividade,
+                        cargo_ping_treinos, canal_treinos, canal_inatividade, canal_logs_treino,
                         pontos_por_treino, cargo_verificado,
                         lembrete_treino_minutos, dm_treinos,
                         xp_soldado, xp_cabo, xp_sargento, pontos_por_msg,
@@ -308,7 +314,7 @@ class Database:
                     config["server_id"], config.get("canal_avaliacao"), config.get("canal_registro"),
                     config.get("canal_logs"), config.get("cargo_recruta"), config.get("cargo_soldado"),
                     config.get("cargo_cabo"), config.get("cargo_sargento"), config.get("cargo_ping_treinos"),
-                    config.get("canal_treinos"), config.get("canal_inatividade"),
+                    config.get("canal_treinos"), config.get("canal_inatividade"), config.get("canal_logs_treino"),
                     config.get("pontos_por_treino", 2), config.get("cargo_verificado"),
                     config.get("lembrete_treino_minutos", 30), config.get("dm_treinos", 1),
                     config.get("xp_soldado", 100), config.get("xp_cabo", 300), config.get("xp_sargento", 600),
