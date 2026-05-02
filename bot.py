@@ -457,7 +457,7 @@ async def on_raw_reaction_add(payload):
             return
 
         member = guild.get_member(payload.user_id)
-        if not member or not member.guild_permissions.manage_roles:
+        if not member or not member.guild_permissions.administrator:
             return
 
         channel = guild.get_channel(payload.channel_id)
@@ -482,13 +482,16 @@ async def on_raw_reaction_add(payload):
 
         if emoji == "✅":
             if not cargo_id or not role:
+                await channel.send("❌ Cargo de verificado não configurado ou não encontrado. Use /set_verified_role para definir.")
                 return
             if role not in target_member.roles:
                 try:
                     await target_member.add_roles(role, reason="Verificado por staff")
                     await channel.send(f"✅ {target_member.mention} recebeu o cargo {role.mention}.")
-                except Exception:
-                    pass
+                except Exception as e:
+                    await channel.send(f"❌ Erro ao adicionar cargo: {str(e)}")
+            else:
+                await channel.send(f"✅ {target_member.mention} já possui o cargo {role.mention}.")
         else:
             try:
                 await target_member.send(
