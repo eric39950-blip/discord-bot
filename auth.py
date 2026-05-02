@@ -64,6 +64,14 @@ class Auth:
             session["access_token"] = access_token
             session["user"] = user
             session.permanent = True
+
+            try:
+                admin_guilds = Auth.get_user_servers()
+                session["admin_guild_ids"] = [guild["id"] for guild in admin_guilds]
+            except Exception as exc:
+                print(f"[Auth] failed to populate admin_guild_ids: {exc}")
+                session["admin_guild_ids"] = []
+
             return True
         return False
 
@@ -72,6 +80,7 @@ class Auth:
         session.pop("access_token", None)
         session.pop("user", None)
         session.pop("oauth_state", None)
+        session.pop("admin_guild_ids", None)
 
     @staticmethod
     def get_current_user() -> Optional[Dict[str, Any]]:
@@ -112,10 +121,12 @@ class Auth:
         if not Auth.is_logged_in():
             return False, "not_logged_in"
 
-        user_servers = Auth.get_user_servers()
-        server = next((s for s in user_servers if s["id"] == server_id), None)
+        admin_guild_ids = session.get("admin_guild_ids")
+        if admin_guild_ids is None:
+            user_servers = Auth.get_user_servers()
+            admin_guild_ids = [guild["id"] for guild in user_servers]
 
-        if not server:
+        if server_id not in admin_guild_ids:
             return False, "not_admin"
 
         if not DiscordAPI.is_bot_in_guild(server_id):
