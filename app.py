@@ -288,6 +288,27 @@ def api_delete_patente(patente_id):
 
     return jsonify({"success": True})
 
+@app.route("/api/config/restore", methods=["POST"])
+@login_required
+def api_restore_config():
+    data = request.get_json()
+    server_id = data.get("server_id")
+    if not server_id:
+        return jsonify({"error": "server_id_required"}), 400
+
+    authorized, reason = require_server_admin(server_id)
+    if not authorized:
+        return jsonify({"error": "unauthorized", "reason": reason}), 403
+
+    backup_config = db._load_backup_config(server_id)
+    if not backup_config:
+        return jsonify({"error": "no_backup_found"}), 404
+
+    if db.save_config(backup_config):
+        return jsonify({"success": True, "message": "Config restaurada do backup"})
+    else:
+        return jsonify({"error": "restore_failed"}), 500
+
 @app.route("/api/config", methods=["POST"])
 @login_required
 def api_save_config():
