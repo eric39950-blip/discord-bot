@@ -32,6 +32,18 @@ async def send_log_embed(guild: discord.Guild, embed: discord.Embed):
         except:
             pass
 
+async def send_treino_log_embed(guild: discord.Guild, embed: discord.Embed):
+    config = db.get_config(str(guild.id))
+    canal_logs_treino = config.get("canal_logs_treino")
+    if not canal_logs_treino:
+        return
+    channel = guild.get_channel(int(canal_logs_treino))
+    if channel:
+        try:
+            await channel.send(embed=embed)
+        except:
+            pass
+
 
 def parse_role_from_input(guild: discord.Guild, raw_text: str) -> Optional[discord.Role]:
     if not raw_text:
@@ -975,13 +987,14 @@ async def help(interaction: discord.Interaction):
     embed.add_field(name="/clear-xp", value="Limpar XP de um usuário (staff)", inline=False)
     embed.add_field(name="/setup_ticket", value="Configura sistema de tickets (staff)", inline=False)
     embed.add_field(name="/setup_logs", value="Configura notificações de eventos (staff)", inline=False)
+    embed.add_field(name="/setup_logs_treino", value="Configura canal de logs para treinos/eventos (staff)", inline=False)
     embed.add_field(name="/close", value="Fecha ticket (staff)", inline=False)
     embed.add_field(name="/set_ping_treinos", value="Define cargo para ping de treinos (staff)", inline=False)
     embed.add_field(name="/set_verified_role", value="Define o cargo de verificado para tickets", inline=False)
     embed.add_field(name="/last_active", value="Mostra quando um usuário falou por último", inline=False)
     embed.add_field(name="/activity_status", value="Mostra atividade em treinos e em chat", inline=False)
-    embed.add_field(name="/novo_treino", value="Cria um novo treino via formulário modal (staff)", inline=False)
-    embed.add_field(name="/resultadotreino", value="Registra resultado de um treino e distribui pontos", inline=False)
+    embed.add_field(name="/novo_evento", value="Cria um novo evento via formulário modal (staff)", inline=False)
+    embed.add_field(name="/resultadotreino", value="Registra resultado de um evento e distribui pontos", inline=False)
     embed.add_field(name="/set_inactivity_channel", value="Define o canal para encaminhar respostas de inatividade (staff)", inline=False)
     embed.add_field(name="/set_message_points", value="Define pontos por mensagem no chat (staff)", inline=False)
     embed.add_field(name="/set_treino_points", value="Define pontos por presença em treino (staff)", inline=False)
@@ -1194,6 +1207,20 @@ async def setup_logs(interaction: discord.Interaction):
     )
     await send_log_embed(interaction.guild, log_embed)
 
+@bot.tree.command(name="setup_logs_treino", description="Configura canal de logs para treinos/eventos (staff)")
+@app_commands.describe(channel="Canal onde os resultados de treinos/eventos serão enviados")
+async def setup_logs_treino(interaction: discord.Interaction, channel: discord.TextChannel):
+    if not interaction.user.guild_permissions.manage_channels:
+        await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+        return
+
+    server_id = str(interaction.guild.id)
+    config = db.get_config(server_id)
+    config["canal_logs_treino"] = str(channel.id)
+    db.save_config(config)
+
+    await interaction.response.send_message(f"✅ Canal de logs de treinos/eventos definido como {channel.mention}.", ephemeral=True)
+
 @bot.tree.command(name="close", description="Fecha o ticket atual (staff)")
 async def close(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.manage_channels:
@@ -1250,8 +1277,9 @@ async def set_canal_treino(interaction: discord.Interaction, channel: discord.Te
 
     await interaction.response.send_message(f"✅ Canal de treinos definido como {channel.mention}!", ephemeral=True)
 
-class NovoTreinoModal(discord.ui.Modal, title="Novo Treino"):
-    message = discord.ui.TextInput(label="Mensagem do treino", style=discord.TextStyle.paragraph, required=True, max_length=1024)
+class NovoTreinoModal(discord.ui.Modal, title="Novo Evento"):
+    title = discord.ui.TextInput(label="Título do evento", style=discord.TextStyle.short, required=True, max_length=100)
+    description = discord.ui.TextInput(label="Descrição do evento", style=discord.TextStyle.paragraph, required=True, max_length=1024)
     points = discord.ui.TextInput(label="Pontos por confirmação", style=discord.TextStyle.short, required=True, default="2")
     role = discord.ui.TextInput(label="Cargo para ping (mention, nome ou ID)", style=discord.TextStyle.short, required=False, placeholder="@Cargo, nome do cargo ou ID do cargo")
     channel = discord.ui.TextInput(label="Canal de publicação (mention, nome ou ID)", style=discord.TextStyle.short, required=False, placeholder="#canal, nome ou ID do canal")
@@ -1295,8 +1323,8 @@ class NovoTreinoModal(discord.ui.Modal, title="Novo Treino"):
         treino_id = db.create_treino(
             server_id,
             str(interaction.user.id),
-            "Treino",
-            self.message.value,
+            self.title.value,
+            self.description.value,
             "",
             str(publish_channel.id),
             points,
@@ -1304,29 +1332,31 @@ class NovoTreinoModal(discord.ui.Modal, title="Novo Treino"):
         )
 
         embed = discord.Embed(
-            title="Novo Treino Registrado",
-            description=self.message.value,
+            title="Novo Evento Registrado",
+            description=self.description.value,
             color=discord.Color.blue()
         )
+        embed.add_field(name="Título", value=self.title.value, inline=False)
+        embed.add_field(name="ID do Evento", value=str(treino_id), inline=True)
         embed.add_field(name="Pontos por confirmação", value=str(points), inline=True)
         embed.add_field(name="Canal", value=publish_channel.mention, inline=True)
         embed.add_field(name="Alvo", value=target_role.mention if target_role else "Todos", inline=True)
         embed.add_field(name="Confirmados", value="0", inline=True)
         embed.add_field(name="Talvez", value="0", inline=True)
         embed.add_field(name="Não vou", value="0", inline=True)
-        embed.set_footer(text=f"Criado por {interaction.user.display_name} | ID: {treino_id}")
+        embed.set_footer(text=f"Criado por {interaction.user.display_name}")
 
         view = TreinoConfirmView(treino_id, server_id)
         message_obj = await publish_channel.send(content=target_role.mention if target_role else None, embed=embed, view=view, allowed_mentions=discord.AllowedMentions(roles=True))
         db.update_treino_mensagem(treino_id, str(message_obj.id))
 
-        await interaction.response.send_message(f"✅ Treino criado em {publish_channel.mention}.", ephemeral=True)
+        await interaction.response.send_message(f"✅ Evento criado em {publish_channel.mention}.", ephemeral=True)
 
-@bot.tree.command(name="novo_treino", description="Cria um novo treino com mensagem, pontos e alvo (staff)")
-async def novo_treino(interaction: discord.Interaction):
+@bot.tree.command(name="novo_evento", description="Cria um novo evento com título, pontos e alvo (staff)")
+async def novo_evento(interaction: discord.Interaction):
     await interaction.response.send_modal(NovoTreinoModal(interaction))
 
-class ResultadoTreinoModal(discord.ui.Modal, title="Resultado do Treino"):
+class ResultadoTreinoModal(discord.ui.Modal, title="Resultado do Evento"):
     treino_id = discord.ui.TextInput(label="ID do treino", style=discord.TextStyle.short, required=True)
     resultado = discord.ui.TextInput(label="Resumo do resultado", style=discord.TextStyle.paragraph, required=True)
     participantes = discord.ui.TextInput(label="Membros que participaram (mentions ou IDs)", style=discord.TextStyle.paragraph, required=False, placeholder="Deixe em branco para usar quem marcou 'vou'")
@@ -1362,6 +1392,10 @@ class ResultadoTreinoModal(discord.ui.Modal, title="Resultado do Treino"):
         if not actual_ids:
             actual_ids = {r["discord_id"] for r in respostas if r["resposta"] == "vou"}
 
+        count_vou = sum(1 for r in respostas if r["resposta"] == "vou")
+        count_talvez = sum(1 for r in respostas if r["resposta"] == "talvez")
+        count_nao = sum(1 for r in respostas if r["resposta"] == "nao")
+
         awarded_count = 0
         awarded_list = []
         for discord_id in actual_ids:
@@ -1371,7 +1405,7 @@ class ResultadoTreinoModal(discord.ui.Modal, title="Resultado do Treino"):
                 username = str(member)
             try:
                 db.create_or_update_user(server_id, discord_id, username)
-                db.add_xp(server_id, discord_id, points, "treino", f"Treino confirmado: {treino['descricao'][:64]}")
+                db.add_xp(server_id, discord_id, points, "treino", f"Evento confirmado: {treino['descricao'][:64]}")
                 awarded_count += 1
                 awarded_list.append(discord_id)
             except Exception:
@@ -1384,28 +1418,36 @@ class ResultadoTreinoModal(discord.ui.Modal, title="Resultado do Treino"):
         db.finalize_treino(treino_id)
 
         log_embed = discord.Embed(
-            title="Resultado de Treino Registrado",
+            title="Resultado de Evento Registrado",
             description=self.resultado.value,
             color=discord.Color.green()
         )
-        log_embed.add_field(name="Treino", value=treino["descricao"], inline=False)
+        log_embed.add_field(name="Evento", value=treino.get("titulo", treino.get("descricao", "Sem título")), inline=False)
+        log_embed.add_field(name="ID do Evento", value=str(treino_id), inline=True)
+        log_embed.add_field(name="Vão", value=str(count_vou), inline=True)
+        log_embed.add_field(name="Talvez", value=str(count_talvez), inline=True)
+        log_embed.add_field(name="Não vão", value=str(count_nao), inline=True)
+        log_embed.add_field(name="Participantes confirmados", value=str(awarded_count), inline=True)
         log_embed.add_field(name="Pontos por participante", value=str(points), inline=True)
-        log_embed.add_field(name="Participantes registrados", value=str(awarded_count), inline=True)
         log_embed.set_footer(text=f"Registrado por {interaction.user.display_name}")
-        await send_log_embed(interaction.guild, log_embed)
+        await send_treino_log_embed(interaction.guild, log_embed)
 
         treino_channel = interaction.guild.get_channel(int(treino["canal_id"])) if treino.get("canal_id") else None
         if treino_channel and treino.get("mensagem_id"):
             try:
                 treino_message = await treino_channel.fetch_message(int(treino["mensagem_id"]))
                 result_embed = discord.Embed(
-                    title="Resultado do Treino",
-                    description=treino["descricao"],
+                    title="Resultado do Evento",
+                    description=treino.get("descricao", ""),
                     color=discord.Color.green()
                 )
                 result_embed.add_field(name="Resultado", value=self.resultado.value, inline=False)
-                result_embed.add_field(name="Pontos por participante", value=str(points), inline=True)
+                result_embed.add_field(name="ID do Evento", value=str(treino_id), inline=True)
+                result_embed.add_field(name="Vão", value=str(count_vou), inline=True)
+                result_embed.add_field(name="Talvez", value=str(count_talvez), inline=True)
+                result_embed.add_field(name="Não vão", value=str(count_nao), inline=True)
                 result_embed.add_field(name="Participantes que compareceram", value=str(awarded_count), inline=True)
+                result_embed.add_field(name="Pontos por participante", value=str(points), inline=True)
                 result_embed.set_footer(text=f"Registrado por {interaction.user.display_name}")
                 await treino_message.edit(embed=result_embed, view=None)
             except Exception:
