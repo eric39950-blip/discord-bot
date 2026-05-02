@@ -1278,7 +1278,7 @@ async def set_canal_treino(interaction: discord.Interaction, channel: discord.Te
     await interaction.response.send_message(f"✅ Canal de treinos definido como {channel.mention}!", ephemeral=True)
 
 class NovoTreinoModal(discord.ui.Modal, title="Novo Evento"):
-    title = discord.ui.TextInput(label="Título do evento", style=discord.TextStyle.short, required=True, max_length=100)
+    titulo_evento = discord.ui.TextInput(label="Título do evento", style=discord.TextStyle.short, required=True, max_length=100)
     description = discord.ui.TextInput(label="Descrição do evento", style=discord.TextStyle.paragraph, required=True, max_length=1024)
     points = discord.ui.TextInput(label="Pontos por confirmação", style=discord.TextStyle.short, required=True, default="2")
     role = discord.ui.TextInput(label="Cargo para ping (mention, nome ou ID)", style=discord.TextStyle.short, required=False, placeholder="@Cargo, nome do cargo ou ID do cargo")
@@ -1323,7 +1323,7 @@ class NovoTreinoModal(discord.ui.Modal, title="Novo Evento"):
         treino_id = db.create_treino(
             server_id,
             str(interaction.user.id),
-            self.title.value,
+            self.titulo_evento.value,
             self.description.value,
             "",
             str(publish_channel.id),
@@ -1336,7 +1336,7 @@ class NovoTreinoModal(discord.ui.Modal, title="Novo Evento"):
             description=self.description.value,
             color=discord.Color.blue()
         )
-        embed.add_field(name="Título", value=self.title.value, inline=False)
+        embed.add_field(name="Título", value=self.titulo_evento.value, inline=False)
         embed.add_field(name="ID do Evento", value=str(treino_id), inline=True)
         embed.add_field(name="Pontos por confirmação", value=str(points), inline=True)
         embed.add_field(name="Canal", value=publish_channel.mention, inline=True)
