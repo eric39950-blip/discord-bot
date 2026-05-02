@@ -29,6 +29,8 @@ class Database:
                     cargo_sargento TEXT,
                     cargo_ping_treinos TEXT,
                     canal_treinos TEXT,
+                    canal_inatividade TEXT,
+                    pontos_por_treino INTEGER DEFAULT 2,
                     cargo_verificado TEXT,
                     lembrete_treino_minutos INTEGER DEFAULT 30,
                     dm_treinos INTEGER DEFAULT 1,
@@ -105,7 +107,23 @@ class Database:
             except sqlite3.OperationalError:
                 pass
             try:
+                cursor.execute("ALTER TABLE configuracoes ADD COLUMN canal_inatividade TEXT")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("ALTER TABLE configuracoes ADD COLUMN pontos_por_treino INTEGER DEFAULT 2")
+            except sqlite3.OperationalError:
+                pass
+            try:
                 cursor.execute("ALTER TABLE configuracoes ADD COLUMN cargo_verificado TEXT")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("ALTER TABLE treinos ADD COLUMN pontos INTEGER DEFAULT 2")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("ALTER TABLE treinos ADD COLUMN target_role_id TEXT")
             except sqlite3.OperationalError:
                 pass
             try:
@@ -141,6 +159,8 @@ class Database:
                     horario_inicio TEXT,
                     canal_id TEXT,
                     mensagem_id TEXT,
+                    pontos INTEGER DEFAULT 2,
+                    target_role_id TEXT,
                     status TEXT DEFAULT 'aberto',
                     lembrete_enviado INTEGER DEFAULT 0,
                     criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -211,6 +231,8 @@ class Database:
                 "cargo_sargento": None,
                 "cargo_ping_treinos": None,
                 "canal_treinos": None,
+                "canal_inatividade": None,
+                "pontos_por_treino": 2,
                 "cargo_verificado": None,
                 "lembrete_treino_minutos": 30,
                 "dm_treinos": 1,
@@ -234,17 +256,19 @@ class Database:
                 INSERT OR REPLACE INTO configuracoes (
                     server_id, canal_avaliacao, canal_registro, canal_logs,
                     cargo_recruta, cargo_soldado, cargo_cabo, cargo_sargento,
-                    cargo_ping_treinos, canal_treinos, cargo_verificado,
+                    cargo_ping_treinos, canal_treinos, canal_inatividade,
+                    pontos_por_treino, cargo_verificado,
                     lembrete_treino_minutos, dm_treinos,
                     xp_soldado, xp_cabo, xp_sargento, pontos_por_msg,
                     pontos_por_registro, cooldown_msg, auto_promover,
                     precisa_aprovacao, sistema_ativo, usar_dm, usar_ia
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 config["server_id"], config.get("canal_avaliacao"), config.get("canal_registro"),
                 config.get("canal_logs"), config.get("cargo_recruta"), config.get("cargo_soldado"),
                 config.get("cargo_cabo"), config.get("cargo_sargento"), config.get("cargo_ping_treinos"),
-                config.get("canal_treinos"), config.get("cargo_verificado"),
+                config.get("canal_treinos"), config.get("canal_inatividade"),
+                config.get("pontos_por_treino", 2), config.get("cargo_verificado"),
                 config.get("lembrete_treino_minutos", 30), config.get("dm_treinos", 1),
                 config.get("xp_soldado", 100), config.get("xp_cabo", 300), config.get("xp_sargento", 600),
                 config.get("pontos_por_msg", 10), config.get("pontos_por_registro", 50),
@@ -482,13 +506,13 @@ class Database:
             """, (server_id,))
             return [row[0] for row in cursor.fetchall()]
 
-    def create_treino(self, server_id: str, criado_por: str, titulo: str = "Treino", descricao: str = "", horario_inicio: str = "", canal_id: str = "") -> int:
+    def create_treino(self, server_id: str, criado_por: str, titulo: str = "Treino", descricao: str = "", horario_inicio: str = "", canal_id: str = "", pontos: int = 2, target_role_id: str = "") -> int:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO treinos (server_id, criado_por, titulo, descricao, horario_inicio, canal_id)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (server_id, criado_por, titulo, descricao, horario_inicio, canal_id))
+                INSERT INTO treinos (server_id, criado_por, titulo, descricao, horario_inicio, canal_id, pontos, target_role_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (server_id, criado_por, titulo, descricao, horario_inicio, canal_id, pontos, target_role_id))
             conn.commit()
             return cursor.lastrowid
 
@@ -538,6 +562,20 @@ class Database:
             """, (treino_id,))
             columns = [desc[0] for desc in cursor.description]
             return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+    def get_treino_resposta(self, treino_id: int, discord_id: str) -> Optional[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM treino_respostas
+                WHERE treino_id = ? AND discord_id = ?
+                LIMIT 1
+            """, (treino_id, discord_id))
+            row = cursor.fetchone()
+            if row:
+                columns = [desc[0] for desc in cursor.description]
+                return dict(zip(columns, row))
+            return None
 
     def set_treino_resposta(self, treino_id: int, server_id: str, discord_id: str, resposta: str):
         with self._get_connection() as conn:
