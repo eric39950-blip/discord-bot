@@ -488,6 +488,13 @@ async def on_raw_reaction_add(payload):
                 try:
                     await target_member.add_roles(role, reason="Verificado por staff")
                     await channel.send(f"✅ {target_member.mention} recebeu o cargo {role.mention}.")
+                    try:
+                        await target_member.send(
+                            f"✅ Parabéns! Sua solicitação de verificação foi aprovada no servidor {guild.name}. "
+                            f"Você recebeu o cargo {role.name}."
+                        )
+                    except Exception:
+                        pass
                 except Exception as e:
                     await channel.send(f"❌ Erro ao adicionar cargo: {str(e)}")
             else:
