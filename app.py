@@ -207,7 +207,14 @@ def api_get_patentes():
     if not authorized:
         return jsonify({"error": "unauthorized", "reason": reason}), 403
 
-    db.ensure_default_patentes(server_id)
+    # Garantir que patentes padrão existem (com cargos no Discord)
+    result = db.ensure_default_patentes(server_id)
+    if not result.get("success"):
+        return jsonify({
+            "error": "failed_to_initialize_patentes",
+            "message": result.get("error", "Erro desconhecido")
+        }), 500
+    
     patentes = db.get_patentes(server_id)
     return jsonify({"success": True, "data": patentes})
 
@@ -224,6 +231,17 @@ def api_create_patente():
         return jsonify({"error": "unauthorized", "reason": reason}), 403
 
     role_id = data.get("role_id")
+    
+    # Se não forneceu role_id, criar cargo no Discord
+    if not role_id:
+        role_result = DiscordAPI.ensure_discord_role(server_id, data["nome"])
+        if "error" in role_result:
+            return jsonify({
+                "error": "failed_to_create_discord_role",
+                "message": role_result.get("message", "Erro desconhecido")
+            }), 500
+        role_id = role_result.get("id")
+    
     xp_necessario = int(data.get("xp_necessario", 0))
     ordem = int(data.get("ordem", 0))
     pode_excluir = int(data.get("pode_excluir", 1))
