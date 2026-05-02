@@ -2,6 +2,7 @@ import sqlite3
 from datetime import datetime
 from typing import List, Dict, Optional, Any
 from config import DB_PATH
+from discord_api import DiscordAPI
 
 class Database:
     def __init__(self, db_path: str = str(DB_PATH)):
@@ -752,25 +753,87 @@ class Database:
             conn.commit()
             return cursor.rowcount > 0
 
-    def ensure_default_patentes(self, server_id: str):
+    def ensure_default_patentes(self, server_id: str) -> Dict[str, Any]:
+        """
+        Cria as patentes padrão e seus cargos no Discord.
+        
+        Retorna:
+        {
+            "success": True/False,
+            "created": True/False (True se foram criadas nesta chamada),
+            "error": None ou string de erro,
+            "roles_created": Dict com status de criação de cada cargo
+        }
+        """
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT COUNT(*) FROM patentes WHERE server_id = ?", (server_id,))
             total = cursor.fetchone()[0] or 0
             if total > 0:
-                return
+                return {
+                    "success": True,
+                    "created": False,
+                    "error": None,
+                    "roles_created": {}
+                }
 
-            defaults = [
-                (server_id, "Recruta", None, 0, 1, 0),
-                (server_id, "Soldado", None, 100, 2, 1),
-                (server_id, "Cabo", None, 300, 3, 1),
-                (server_id, "Sargento", None, 600, 4, 1)
+            # Nomes e dados das patentes padrão
+            patente_defaults = [
+                {"nome": "Recruta", "xp": 0, "ordem": 1, "pode_excluir": 0},
+                {"nome": "Soldado", "xp": 100, "ordem": 2, "pode_excluir": 1},
+                {"nome": "Cabo", "xp": 300, "ordem": 3, "pode_excluir": 1},
+                {"nome": "Sargento", "xp": 600, "ordem": 4, "pode_excluir": 1}
             ]
-            cursor.executemany("""
-                INSERT INTO patentes (server_id, nome, role_id, xp_necessario, ordem, pode_excluir)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, defaults)
-            conn.commit()
+
+            roles_created = {}
+            rows_to_insert = []
+            
+            # Criar cargos no Discord para cada patente
+            for patente in patente_defaults:
+                nome = patente["nome"]
+                role_result = DiscordAPI.ensure_discord_role(server_id, nome)
+                roles_created[nome] = role_result
+                
+                if "error" in role_result:
+                    # Se erro ao criar cargo, retornar erro
+                    return {
+                        "success": False,
+                        "created": False,
+                        "error": f"Erro ao criar cargo '{nome}': {role_result.get('message', 'Desconhecido')}",
+                        "roles_created": roles_created
+                    }
+                
+                role_id = role_result.get("id")
+                rows_to_insert.append((
+                    server_id,
+                    nome,
+                    role_id,
+                    patente["xp"],
+                    patente["ordem"],
+                    patente["pode_excluir"]
+                ))
+
+            # Inserir todas as patentes com seus role_ids
+            try:
+                cursor.executemany("""
+                    INSERT INTO patentes (server_id, nome, role_id, xp_necessario, ordem, pode_excluir)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, rows_to_insert)
+                conn.commit()
+                
+                return {
+                    "success": True,
+                    "created": True,
+                    "error": None,
+                    "roles_created": roles_created
+                }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "created": False,
+                    "error": f"Erro ao inserir patentes no banco: {str(e)}",
+                    "roles_created": roles_created
+                }
 
 # Instância global
 db = Database()
