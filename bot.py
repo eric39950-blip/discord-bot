@@ -444,7 +444,8 @@ async def on_raw_reaction_add(payload):
         if payload.user_id == bot.user.id:
             return
 
-        if str(payload.emoji) != "✅":
+        emoji = str(payload.emoji)
+        if emoji not in ["✅", "❌"]:
             return
 
         if not payload.guild_id or not payload.channel_id:
@@ -470,25 +471,32 @@ async def on_raw_reaction_add(payload):
         if message.author.bot or message.author.id == payload.user_id:
             return
 
-        config = db.get_config(str(guild.id))
-        cargo_id = config.get("cargo_verificado")
-        if not cargo_id:
-            return
-
-        role = guild.get_role(int(cargo_id))
-        if not role:
-            return
-
         target_member = guild.get_member(message.author.id)
         if not target_member:
             return
 
-        if role not in target_member.roles:
+        config = db.get_config(str(guild.id))
+        cargo_id = config.get("cargo_verificado")
+        role = guild.get_role(int(cargo_id)) if cargo_id else None
+
+        if emoji == "✅":
+            if not cargo_id or not role:
+                return
+            if role not in target_member.roles:
+                try:
+                    await target_member.add_roles(role, reason="Verificado por staff")
+                    await channel.send(f"✅ {target_member.mention} recebeu o cargo {role.mention}.")
+                except Exception:
+                    pass
+        else:
             try:
-                await target_member.add_roles(role, reason="Verificado por staff")
-                await channel.send(f"✅ {target_member.mention} recebeu o cargo {role.mention}.")
+                await target_member.send(
+                    "❌ Sua solicitação foi analisada pela equipe e não foi aprovada. "
+                    "Por favor, revise as instruções e tente novamente se desejar."
+                )
             except Exception:
                 pass
+            await channel.send(f"❌ Solicitação de {target_member.mention} foi recusada pelo staff.")
     except Exception as e:
         print("Erro em on_raw_reaction_add:", e)
 
@@ -837,10 +845,32 @@ async def setup_ticket(interaction: discord.Interaction):
         return
 
     embed = discord.Embed(
-        title="🎫 Sistema de Suporte",
-        description="Clique no botão abaixo para abrir um ticket de suporte.",
+        title="🎫 Atendimento de Suporte",
+        description=(
+            "Abra um ticket para registrar sua solicitação de verificação ou suporte. "
+            "A equipe irá analisar sua solicitação neste canal com atenção e retornará o mais breve possível."
+        ),
         color=discord.Color.blue()
     )
+    embed.add_field(
+        name="Como funciona",
+        value=(
+            "1. Clique em 'Abrir Ticket' para criar um canal privado.\n"
+            "2. Responda ao formulário de verificação com informações verdadeiras.\n"
+            "3. A equipe irá revisar sua solicitação. Staff usará reações para aprovar ou rejeitar."
+        ),
+        inline=False
+    )
+    embed.add_field(
+        name="Avaliação",
+        value=(
+            "✅ Aprovar — o usuário receberá o cargo configurado de verificado.\n"
+            "❌ Rejeitar — o usuário não receberá o cargo e será informado da recusa."
+        ),
+        inline=False
+    )
+    embed.set_footer(text="Apenas staff autorizado pode abrir, analisar e responder tickets.")
+
     view = TicketView()
     await interaction.response.send_message(embed=embed, view=view)
 
@@ -1004,6 +1034,62 @@ async def inactive(interaction: discord.Interaction, minutes: int = 60):
         "Usuarios inativos:\n" + "\n".join(lines[:25]),
         ephemeral=True
     )
+
+def format_elapsed_time(seconds: int) -> str:
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}min"
+    if seconds < 86400:
+        return f"{seconds // 3600}h"
+    if seconds < 30 * 86400:
+        return f"{seconds // 86400}d"
+    if seconds < 365 * 86400:
+        return f"{seconds // (30 * 86400)}mês"
+    return f"{seconds // (365 * 86400)}ano"
+
+@bot.tree.command(name="activity_status", description="Mostra status de atividade dos usuários com emoji de inatividade")
+async def activity_status(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.manage_roles:
+        await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+        return
+
+    server_id = str(interaction.guild.id)
+    users = db.get_users_with_activity(server_id)
+    if not users:
+        await interaction.response.send_message("✅ Nenhum usuário com registro de atividade encontrado.", ephemeral=True)
+        return
+
+    now_ts = int(datetime.now().timestamp())
+    lines = []
+    for user_data in sorted(users, key=lambda u: u["ultimo_atividade"]):
+        last_activity = user_data.get("ultimo_atividade", 0)
+        if last_activity <= 0:
+            continue
+
+        inactivity = now_ts - last_activity
+        if inactivity >= 3 * 24 * 60 * 60:
+            status = "🔴"
+        elif inactivity > 2 * 24 * 60 * 60:
+            status = "🟡"
+        else:
+            status = "🟢"
+
+        member = interaction.guild.get_member(int(user_data["discord_id"]))
+        display_name = member.mention if member else str(user_data["discord_id"])
+        lines.append(f"{status} {display_name} — {format_elapsed_time(inactivity)}")
+
+    if not lines:
+        await interaction.response.send_message("✅ Nenhum usuário ativo encontrado no servidor.", ephemeral=True)
+        return
+
+    header = (
+        "🔍 Status de atividade dos usuários:\n"
+        "🟢 Até 2 dias — ativo.\n"
+        "🟡 Entre 2 e 3 dias — atenção.\n"
+        "🔴 3 dias ou mais — inativo.\n\n"
+    )
+    await interaction.response.send_message(header + "\n".join(lines[:25]), ephemeral=True)
 
 @tasks.loop(minutes=1)
 async def lembrete_task():
