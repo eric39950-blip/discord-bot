@@ -469,7 +469,7 @@ async def on_raw_reaction_add(payload):
         except Exception:
             return
 
-        if message.author.bot or message.author.id == payload.user_id:
+        if message.author.bot:
             return
 
         target_member = guild.get_member(message.author.id)
