@@ -300,25 +300,56 @@ class FormularioView(discord.ui.View):
         await interaction.response.send_message(f"```\n{formulario_texto}\n```", ephemeral=True)
 
 class TreinoConfirmView(discord.ui.View):
-    def __init__(self, treino_id: int, server_id: str, discord_id: str):
+    def __init__(self, treino_id: int, server_id: str):
         super().__init__(timeout=None)
         self.treino_id = treino_id
         self.server_id = server_id
-        self.discord_id = discord_id
 
     @discord.ui.button(label="✅ Vou", style=discord.ButtonStyle.success)
     async def confirm_vou(self, interaction: discord.Interaction, button: discord.ui.Button):
-        db.set_treino_resposta(self.treino_id, self.server_id, self.discord_id, "vou")
-        await interaction.response.send_message("✅ Resposta registrada: Vou!", ephemeral=True)
+        discord_id = str(interaction.user.id)
+        existing = db.get_treino_resposta(self.treino_id, discord_id)
+        if existing and existing.get("resposta") == "vou":
+            await interaction.response.send_message("✅ Sua resposta já está registrada como Vou!", ephemeral=True)
+            return
+
+        db.set_treino_resposta(self.treino_id, self.server_id, discord_id, "vou")
+        db.create_or_update_user(self.server_id, discord_id, str(interaction.user))
+        db.update_last_activity(self.server_id, discord_id)
+        config = db.get_config(self.server_id)
+        treino = db.get_treino(self.treino_id)
+        pontos = treino.get("pontos", config.get("pontos_por_treino", 2)) if treino else config.get("pontos_por_treino", 2)
+        try:
+            db.add_xp(self.server_id, discord_id, pontos, "treino", "Presença confirmada em treino")
+        except Exception:
+            pass
+
+        await interaction.response.send_message(f"✅ Resposta registrada: Vou! Você ganhou {pontos} pontos de treino.", ephemeral=True)
 
     @discord.ui.button(label="🤔 Talvez", style=discord.ButtonStyle.secondary)
     async def confirm_talvez(self, interaction: discord.Interaction, button: discord.ui.Button):
-        db.set_treino_resposta(self.treino_id, self.server_id, self.discord_id, "talvez")
+        discord_id = str(interaction.user.id)
+        existing = db.get_treino_resposta(self.treino_id, discord_id)
+        if existing and existing.get("resposta") == "talvez":
+            await interaction.response.send_message("🤔 Sua resposta já está registrada como Talvez!", ephemeral=True)
+            return
+
+        db.set_treino_resposta(self.treino_id, self.server_id, discord_id, "talvez")
+        db.create_or_update_user(self.server_id, discord_id, str(interaction.user))
+        db.update_last_activity(self.server_id, discord_id)
         await interaction.response.send_message("🤔 Resposta registrada: Talvez!", ephemeral=True)
 
     @discord.ui.button(label="❌ Não vou", style=discord.ButtonStyle.danger)
     async def confirm_nao(self, interaction: discord.Interaction, button: discord.ui.Button):
-        db.set_treino_resposta(self.treino_id, self.server_id, self.discord_id, "nao")
+        discord_id = str(interaction.user.id)
+        existing = db.get_treino_resposta(self.treino_id, discord_id)
+        if existing and existing.get("resposta") == "nao":
+            await interaction.response.send_message("❌ Sua resposta já está registrada como Não vou!", ephemeral=True)
+            return
+
+        db.set_treino_resposta(self.treino_id, self.server_id, discord_id, "nao")
+        db.create_or_update_user(self.server_id, discord_id, str(interaction.user))
+        db.update_last_activity(self.server_id, discord_id)
         await interaction.response.send_message("❌ Resposta registrada: Não vou!", ephemeral=True)
 
 @bot.event
@@ -436,6 +467,38 @@ async def on_message(message):
             return
 
         if not message.guild:
+            content = message.content.strip()
+            if not content:
+                return
+
+            for guild in bot.guilds:
+                member = guild.get_member(message.author.id)
+                if not member:
+                    continue
+
+                config = db.get_config(str(guild.id))
+                canal_id = config.get("canal_inatividade")
+                if not canal_id:
+                    continue
+
+                channel = guild.get_channel(int(canal_id)) if canal_id else None
+                if not channel:
+                    continue
+
+                embed = discord.Embed(
+                    title="📨 Resposta de inatividade recebida",
+                    description=content[:2000],
+                    color=discord.Color.orange()
+                )
+                embed.add_field(name="Usuário", value=f"{message.author} ({message.author.id})", inline=False)
+                embed.add_field(name="Servidor", value=guild.name, inline=False)
+                embed.set_footer(text="Mensagem recebida via DM")
+
+                try:
+                    await channel.send(embed=embed)
+                except Exception:
+                    pass
+
             return
 
         content = message.content.lower()
@@ -482,13 +545,15 @@ async def on_message(message):
             if config.get("sistema_ativo", 1) == 0:
                 return
 
-            treino_id = db.create_treino(server_id, str(message.author.id))
-            treino = db.get_treino(treino_id)
-
             canal_id = config.get("canal_treinos") or str(message.channel.id)
             channel = message.guild.get_channel(int(canal_id)) if canal_id else message.channel
             if not channel:
                 channel = message.channel
+
+            pontos_por_treino = config.get("pontos_por_treino", 2)
+            cargo_ping = config.get("cargo_ping_treinos", "")
+            treino_id = db.create_treino(server_id, str(message.author.id), "Treino", "", "", str(channel.id), pontos_por_treino, cargo_ping)
+            treino = db.get_treino(treino_id)
 
             embed = discord.Embed(
                 title="🏋️ Treino Registrado!",
@@ -497,7 +562,7 @@ async def on_message(message):
             )
             embed.set_footer(text="Use os botões abaixo para confirmar presença.")
 
-            view = TreinoConfirmView(treino_id, server_id, str(message.author.id))
+            view = TreinoConfirmView(treino_id, server_id)
             msg = await channel.send(embed=embed, view=view)
             db.update_treino_mensagem(treino_id, str(msg.id))
 
@@ -845,7 +910,11 @@ async def help(interaction: discord.Interaction):
     embed.add_field(name="/set_ping_treinos", value="Define cargo para ping de treinos (staff)", inline=False)
     embed.add_field(name="/set_verified_role", value="Define o cargo de verificado para tickets", inline=False)
     embed.add_field(name="/last_active", value="Mostra quando um usuário falou por último", inline=False)
-    embed.add_field(name="/inactive", value="Mostra usuários inativos", inline=False)
+    embed.add_field(name="/activity_status", value="Mostra atividade em treinos e em chat", inline=False)
+    embed.add_field(name="/novo_treino", value="Cria um novo treino com mensagem, pontos e alvo (staff)", inline=False)
+    embed.add_field(name="/set_inactivity_channel", value="Define o canal para encaminhar respostas de inatividade (staff)", inline=False)
+    embed.add_field(name="/set_message_points", value="Define pontos por mensagem no chat (staff)", inline=False)
+    embed.add_field(name="/set_treino_points", value="Define pontos por presença em treino (staff)", inline=False)
     embed.add_field(name="/hierarchy", value="Mostra cargos/hierarquia do servidor", inline=False)
     embed.add_field(name="+registro treino", value="Registra treino e notifica membros (staff)", inline=False)
     await interaction.response.send_message(embed=embed)
@@ -976,10 +1045,10 @@ async def setup_ticket(interaction: discord.Interaction):
         return
 
     embed = discord.Embed(
-        title="🎫 Atendimento de Suporte",
+        title="� Identificação",
         description=(
-            "Abra um ticket para registrar sua solicitação de verificação ou suporte. "
-            "A equipe irá analisar sua solicitação neste canal com atenção e retornará o mais breve possível."
+            "Para dar início ao processo de emissão do passaporte, abra um ticket e aguarde o contato de um membro da staff, "
+            "que fornecerá o formulário oficial."
         ),
         color=discord.Color.blue()
     )
@@ -1111,6 +1180,116 @@ async def set_canal_treino(interaction: discord.Interaction, channel: discord.Te
 
     await interaction.response.send_message(f"✅ Canal de treinos definido como {channel.mention}!", ephemeral=True)
 
+@bot.tree.command(name="novo_treino", description="Cria um novo treino com mensagem, pontos e alvo (staff)")
+@app_commands.describe(message="Conteúdo do treino", points="Pontos por confirmação", role="Cargo a notificar", channel="Canal onde o treino será publicado")
+async def novo_treino(
+    interaction: discord.Interaction,
+    message: str,
+    points: int = 2,
+    role: Optional[discord.Role] = None,
+    channel: Optional[discord.TextChannel] = None
+):
+    if not interaction.user.guild_permissions.manage_roles:
+        await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+        return
+
+    if points < 0:
+        await interaction.response.send_message("❌ O valor de pontos precisa ser zero ou positivo.", ephemeral=True)
+        return
+
+    server_id = str(interaction.guild.id)
+    config = db.get_config(server_id)
+    publish_channel = channel
+    if not publish_channel:
+        canal_treinos = config.get("canal_treinos")
+        if canal_treinos:
+            publish_channel = interaction.guild.get_channel(int(canal_treinos))
+    if not publish_channel:
+        publish_channel = interaction.channel
+
+    target_role = role
+    if not target_role and config.get("cargo_ping_treinos"):
+        try:
+            target_role = interaction.guild.get_role(int(config.get("cargo_ping_treinos")))
+        except Exception:
+            target_role = None
+
+    target_role_id = str(target_role.id) if target_role else ""
+    treino_id = db.create_treino(
+        server_id,
+        str(interaction.user.id),
+        "Treino",
+        message,
+        "",
+        str(publish_channel.id),
+        points,
+        target_role_id
+    )
+
+    embed = discord.Embed(
+        title="🏋️ Novo Treino Registrado",
+        description=message,
+        color=discord.Color.blue()
+    )
+    embed.add_field(name="Pontos por confirmação", value=str(points), inline=True)
+    embed.add_field(name="Canal", value=publish_channel.mention, inline=True)
+    embed.add_field(name="Alvo", value=target_role.mention if target_role else "Todos", inline=True)
+    embed.set_footer(text=f"Criado por {interaction.user.display_name}")
+
+    view = TreinoConfirmView(treino_id, server_id)
+    await publish_channel.send(content=target_role.mention if target_role else None, embed=embed, view=view, allowed_mentions=discord.AllowedMentions(roles=True))
+    await interaction.response.send_message(f"✅ Treino criado em {publish_channel.mention}.", ephemeral=True)
+
+@bot.tree.command(name="set_inactivity_channel", description="Define o canal para encaminhar respostas de inatividade (staff)")
+@app_commands.describe(channel="Canal para receber respostas de inatividade")
+async def set_inactivity_channel(interaction: discord.Interaction, channel: discord.TextChannel):
+    if not interaction.user.guild_permissions.manage_channels:
+        await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+        return
+
+    server_id = str(interaction.guild.id)
+    config = db.get_config(server_id)
+    config["canal_inatividade"] = str(channel.id)
+    db.save_config(config)
+
+    await interaction.response.send_message(f"✅ Canal de inatividade definido como {channel.mention}.", ephemeral=True)
+
+@bot.tree.command(name="set_message_points", description="Define quantos pontos por mensagem no chat (staff)")
+@app_commands.describe(amount="Quantidade de pontos por mensagem")
+async def set_message_points(interaction: discord.Interaction, amount: int):
+    if not interaction.user.guild_permissions.manage_roles:
+        await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+        return
+
+    if amount < 0:
+        await interaction.response.send_message("❌ O valor precisa ser zero ou positivo.", ephemeral=True)
+        return
+
+    server_id = str(interaction.guild.id)
+    config = db.get_config(server_id)
+    config["pontos_por_msg"] = amount
+    db.save_config(config)
+
+    await interaction.response.send_message(f"✅ Pontos por mensagem definidos para {amount}.", ephemeral=True)
+
+@bot.tree.command(name="set_treino_points", description="Define quantos pontos por presença em treino (staff)")
+@app_commands.describe(amount="Quantidade de pontos por presença em treino")
+async def set_treino_points(interaction: discord.Interaction, amount: int):
+    if not interaction.user.guild_permissions.manage_roles:
+        await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+        return
+
+    if amount < 0:
+        await interaction.response.send_message("❌ O valor precisa ser zero ou positivo.", ephemeral=True)
+        return
+
+    server_id = str(interaction.guild.id)
+    config = db.get_config(server_id)
+    config["pontos_por_treino"] = amount
+    db.save_config(config)
+
+    await interaction.response.send_message(f"✅ Pontos por presença em treino definidos para {amount}.", ephemeral=True)
+
 @bot.tree.command(name="last_active", description="Mostra quando um usuário falou por último")
 @app_commands.describe(user="Usuário para verificar")
 async def last_active(interaction: discord.Interaction, user: discord.Member):
@@ -1194,7 +1373,7 @@ def build_activity_embeds(title: str, header: str, lines: list[str], color: disc
         embeds.append(discord.Embed(title=title, description=description, color=color))
     return embeds
 
-@bot.tree.command(name="activity_status", description="Mostra status de atividade dos usuários com emoji de inatividade")
+@bot.tree.command(name="activity_status", description="Mostra status de atividade em treinos e em chat")
 async def activity_status(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.manage_roles:
         await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
@@ -1207,7 +1386,25 @@ async def activity_status(interaction: discord.Interaction):
         await interaction.response.send_message("❌ Não foi possível encontrar membros no servidor.", ephemeral=True)
         return
 
-    lines = []
+    treino_lines = []
+    treinos = db.get_treinos(server_id)
+    latest_treino = next((t for t in treinos if t.get("status") != "cancelado"), None)
+    if latest_treino:
+        treino_lines.append(f"🎯 Treino: {latest_treino.get('titulo', 'Treino')}")
+        treino_lines.append(f"🕔 Criado em: {latest_treino.get('criado_em', 'Desconhecido')}")
+        treino_lines.append("")
+        respostas = db.get_treino_respostas(latest_treino["id"])
+        if respostas:
+            for resposta in respostas[:25]:
+                member = interaction.guild.get_member(int(resposta["discord_id"]))
+                name = member.mention if member else f"<@{resposta['discord_id']}>"
+                treino_lines.append(f"{name} — {resposta['resposta'].title()}")
+        else:
+            treino_lines.append("Nenhuma resposta registrada para o último treino.")
+    else:
+        treino_lines.append("Nenhum treino registrado no servidor.")
+
+    chat_lines = []
     for member in members:
         user_activity = db.get_last_activity(server_id, str(member.id))
         if user_activity and user_activity > 0:
@@ -1218,18 +1415,21 @@ async def activity_status(interaction: discord.Interaction):
                 status = "🟡"
             else:
                 status = "🟢"
-            lines.append(f"{status} {member.mention} — {format_elapsed_time(inactivity)}")
+            chat_lines.append(f"{status} {member.mention} — {format_elapsed_time(inactivity)}")
         else:
-            lines.append(f"⚪ {member.mention} — Sem registro")
+            chat_lines.append(f"⚪ {member.mention} — Sem registro")
 
-    header = (
-        "🔍 Status de atividade dos usuários do servidor:\n"
+    chat_header = (
+        "💬 Atividade em Chat:\n"
         "🟢 Até 2 dias — ativo.\n"
         "🟡 Entre 2 e 3 dias — atenção.\n"
         "🔴 3 dias ou mais — inativo.\n"
         "⚪ Sem registro — sem atividade registrada.\n\n"
     )
-    embeds = build_activity_embeds("📊 Atividade do servidor", header, lines, discord.Color.blue())
+
+    treino_embeds = build_activity_embeds("📌 Atividade em Treinos", "", treino_lines, discord.Color.blue())
+    chat_embeds = build_activity_embeds("💬 Atividade em Chat", chat_header, chat_lines, discord.Color.blue())
+    embeds = treino_embeds + chat_embeds
 
     if not embeds:
         await interaction.response.send_message("✅ Nenhum usuário encontrado.", ephemeral=True)
