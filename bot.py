@@ -170,19 +170,25 @@ class TicketView(discord.ui.View):
         channel = await guild.create_text_channel(f"ticket-{user.id}", overwrites=overwrites, category=category)
 
         embed = discord.Embed(
-            title="🎫 Ticket Aberto",
-            description=f"Olá {user.mention}, seu ticket foi aberto. Aguarde o suporte responder aqui.",
+            title="🎫 Ticket Aberto com Sucesso",
+            description=(
+                f"Olá {user.mention}, seu ticket foi criado com sucesso. "
+                "A equipe de suporte irá analisar sua solicitação e responder o mais breve possível neste canal."
+            ),
             color=discord.Color.green()
         )
         embed.add_field(name="Canal", value=channel.mention, inline=False)
-        embed.set_footer(text="Somente você e staff com permissão podem ver este canal.")
+        embed.set_footer(text="Apenas você e a equipe autorizada têm acesso a este canal.")
 
         await channel.send(embed=embed)
         
         # Embed do formulário de verificação
         form_embed = discord.Embed(
             title="📋 Formulário de Verificação",
-            description="Você deve fazer sua verificação para ter acesso ao nossa União! Complete o formulário abaixo com as informações solicitadas.",
+            description=(
+                "Para prosseguir com sua entrada na nossa comunidade, por favor responda com atenção ao formulário abaixo. "
+                "Forneça informações verdadeiras e completas para que possamos avaliar sua solicitação adequadamente."
+            ),
             color=discord.Color.from_rgb(255, 165, 0)
         )
         
