@@ -132,22 +132,39 @@ class LogsView(discord.ui.View):
             ephemeral=True
         )
 
-    @discord.ui.button(label="⚠️ Rejeições", style=discord.ButtonStyle.blurple)
-    async def notif_rejections(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(label="⭐ XP Changes", style=discord.ButtonStyle.blurple)
+    async def notif_xp(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not interaction.user.guild_permissions.manage_channels:
             await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
             return
         
+        server_id = str(interaction.guild.id)
+        config = db.get_config(server_id)
+        log_xp = config.get("log_xp", 0)
+        config["log_xp"] = 1 if log_xp == 0 else 0
+        db.save_config(config)
+        
+        status = "ativadas" if config["log_xp"] == 1 else "desativadas"
         await interaction.response.send_message(
-            f"✅ Você será notificado sobre rejeições via DM!",
+            f"✅ Notificações de mudanças de XP {status} no canal de logs!",
             ephemeral=True
         )
+        button.label = "✅ XP Changes" if config["log_xp"] == 1 else "⭐ XP Changes"
 
 class TicketView(discord.ui.View):
     @discord.ui.button(label="🎫 Abrir Ticket", style=discord.ButtonStyle.primary)
     async def open_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
         guild = interaction.guild
         user = interaction.user
+
+        # Verificar se já foi verificado
+        config = db.get_config(str(guild.id))
+        cargo_id = config.get("cargo_verificado")
+        if cargo_id:
+            role = guild.get_role(int(cargo_id))
+            if role and role in user.roles and not user.guild_permissions.administrator:
+                await interaction.response.send_message("❌ Você já foi verificado e possui o cargo necessário. Não é possível abrir outro ticket.", ephemeral=True)
+                return
 
         # Verificar se já existe ticket aberto
         existing_ticket = discord.utils.get(guild.channels, name=f"ticket-{user.id}")
@@ -429,6 +446,13 @@ async def on_message(message):
 
         xp = config.get("pontos_por_msg", 10)
         db.add_xp(server_id, str(message.author.id), xp, "mensagem")
+        if config.get("log_xp", 0) == 1:
+            log_embed = discord.Embed(
+                title="⭐ XP Adicionado",
+                description=f"{message.author.mention} ganhou {xp} XP por mensagem.",
+                color=discord.Color.green()
+            )
+            await send_log_embed(message.guild, log_embed)
         await check_promotion(message.guild, message.author, config)
 
     except Exception as e:
