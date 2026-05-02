@@ -346,6 +346,7 @@ async def on_message(message):
                 if found >= 3:
                     try:
                         await message.add_reaction("✅")
+                        await message.add_reaction("❌")
                         await message.reply(
                             "✅ Formulário recebido! Aguarde um membro da equipe revisar sua solicitação.",
                             mention_author=False
