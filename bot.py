@@ -1048,6 +1048,21 @@ def format_elapsed_time(seconds: int) -> str:
         return f"{seconds // (30 * 86400)}mês"
     return f"{seconds // (365 * 86400)}ano"
 
+def build_activity_embeds(title: str, header: str, lines: list[str], color: discord.Color) -> list[discord.Embed]:
+    embeds = []
+    description = header
+    for line in lines:
+        next_description = f"{description}{line}\n"
+        if len(next_description) > 3800:
+            embeds.append(discord.Embed(title=title, description=description, color=color))
+            description = f"{line}\n"
+        else:
+            description = next_description
+
+    if description:
+        embeds.append(discord.Embed(title=title, description=description, color=color))
+    return embeds
+
 @bot.tree.command(name="activity_status", description="Mostra status de atividade dos usuários com emoji de inatividade")
 async def activity_status(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.manage_roles:
@@ -1055,41 +1070,43 @@ async def activity_status(interaction: discord.Interaction):
         return
 
     server_id = str(interaction.guild.id)
-    users = db.get_users_with_activity(server_id)
-    if not users:
-        await interaction.response.send_message("✅ Nenhum usuário com registro de atividade encontrado.", ephemeral=True)
-        return
-
     now_ts = int(datetime.now().timestamp())
-    lines = []
-    for user_data in sorted(users, key=lambda u: u["ultimo_atividade"]):
-        last_activity = user_data.get("ultimo_atividade", 0)
-        if last_activity <= 0:
-            continue
-
-        inactivity = now_ts - last_activity
-        if inactivity >= 3 * 24 * 60 * 60:
-            status = "🔴"
-        elif inactivity > 2 * 24 * 60 * 60:
-            status = "🟡"
-        else:
-            status = "🟢"
-
-        member = interaction.guild.get_member(int(user_data["discord_id"]))
-        display_name = member.mention if member else str(user_data["discord_id"])
-        lines.append(f"{status} {display_name} — {format_elapsed_time(inactivity)}")
-
-    if not lines:
-        await interaction.response.send_message("✅ Nenhum usuário ativo encontrado no servidor.", ephemeral=True)
+    members = sorted(interaction.guild.members, key=lambda m: m.display_name.lower())
+    if not members:
+        await interaction.response.send_message("❌ Não foi possível encontrar membros no servidor.", ephemeral=True)
         return
+
+    lines = []
+    for member in members:
+        user_activity = db.get_last_activity(server_id, str(member.id))
+        if user_activity and user_activity > 0:
+            inactivity = now_ts - user_activity
+            if inactivity >= 3 * 24 * 60 * 60:
+                status = "🔴"
+            elif inactivity > 2 * 24 * 60 * 60:
+                status = "🟡"
+            else:
+                status = "🟢"
+            lines.append(f"{status} {member.mention} — {format_elapsed_time(inactivity)}")
+        else:
+            lines.append(f"⚪ {member.mention} — Sem registro")
 
     header = (
-        "🔍 Status de atividade dos usuários:\n"
+        "🔍 Status de atividade dos usuários do servidor:\n"
         "🟢 Até 2 dias — ativo.\n"
         "🟡 Entre 2 e 3 dias — atenção.\n"
-        "🔴 3 dias ou mais — inativo.\n\n"
+        "🔴 3 dias ou mais — inativo.\n"
+        "⚪ Sem registro — sem atividade registrada.\n\n"
     )
-    await interaction.response.send_message(header + "\n".join(lines[:25]), ephemeral=True)
+    embeds = build_activity_embeds("📊 Atividade do servidor", header, lines, discord.Color.blue())
+
+    if not embeds:
+        await interaction.response.send_message("✅ Nenhum usuário encontrado.", ephemeral=True)
+        return
+
+    await interaction.response.send_message(embed=embeds[0], ephemeral=True)
+    for embed in embeds[1:]:
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
 @tasks.loop(minutes=1)
 async def lembrete_task():
