@@ -936,6 +936,20 @@ async def set_verified_role(interaction: discord.Interaction, role: discord.Role
 
     await interaction.response.send_message(f"✅ Cargo de verificado definido como {role.mention}!", ephemeral=True)
 
+@bot.tree.command(name="set_canal_treino", description="Define o canal para treinos (staff)")
+@app_commands.describe(channel="Canal para treinos")
+async def set_canal_treino(interaction: discord.Interaction, channel: discord.TextChannel):
+    if not interaction.user.guild_permissions.manage_channels:
+        await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+        return
+
+    server_id = str(interaction.guild.id)
+    config = db.get_config(server_id)
+    config["canal_treinos"] = str(channel.id)
+    db.save_config(config)
+
+    await interaction.response.send_message(f"✅ Canal de treinos definido como {channel.mention}!", ephemeral=True)
+
 @bot.tree.command(name="last_active", description="Mostra quando um usuário falou por último")
 @app_commands.describe(user="Usuário para verificar")
 async def last_active(interaction: discord.Interaction, user: discord.Member):
