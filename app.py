@@ -107,6 +107,160 @@ def api_get_config():
     config = db.get_config(server_id)
     return jsonify({"config": config})
 
+@app.route("/api/config/canais")
+@login_required
+def api_get_config_canais():
+    server_id = request.args.get("server_id")
+    if not server_id:
+        return jsonify({"error": "server_id_required"}), 400
+
+    authorized, reason = Auth.can_manage_server(server_id)
+    print("AUTH CHECK:", server_id, authorized, reason)
+    if not authorized:
+        return jsonify({"error": "unauthorized", "reason": reason}), 403
+
+    db.ensure_default_canais(server_id)
+    canais = db.get_config_canais(server_id)
+    return jsonify({"success": True, "data": canais})
+
+@app.route("/api/config/canais", methods=["POST"])
+@login_required
+def api_create_config_canal():
+    data = request.get_json()
+    if not data or "server_id" not in data or "nome" not in data or "tipo" not in data:
+        return jsonify({"error": "invalid_data", "message": "server_id, nome e tipo são obrigatórios"}), 400
+
+    server_id = data["server_id"]
+    authorized, reason = Auth.can_manage_server(server_id)
+    print("AUTH CHECK:", server_id, authorized, reason)
+    if not authorized:
+        return jsonify({"error": "unauthorized", "reason": reason}), 403
+
+    if db.get_config_canal_by_tipo(server_id, data["tipo"]):
+        return jsonify({"error": "tipo_exists", "message": "Tipo já existe para este servidor"}), 400
+
+    canal_id = data.get("canal_id")
+    obrigatorio = int(data.get("obrigatorio", 0))
+    ordem = int(data.get("ordem", 0))
+    new_id = db.create_config_canal(server_id, data["nome"], data["tipo"], canal_id, obrigatorio, ordem)
+
+    return jsonify({"success": True, "id": new_id, "message": "Canal criado com sucesso"})
+
+@app.route("/api/config/canais/<int:canal_id>", methods=["PUT"])
+@login_required
+def api_update_config_canal(canal_id):
+    data = request.get_json()
+    if not data or "server_id" not in data:
+        return jsonify({"error": "invalid_data", "message": "server_id é obrigatório"}), 400
+
+    server_id = data["server_id"]
+    authorized, reason = Auth.can_manage_server(server_id)
+    print("AUTH CHECK:", server_id, authorized, reason)
+    if not authorized:
+        return jsonify({"error": "unauthorized", "reason": reason}), 403
+
+    success = db.update_config_canal(canal_id, server_id, data)
+    if not success:
+        return jsonify({"error": "not_found", "message": "Canal não encontrado"}), 404
+
+    return jsonify({"success": True})
+
+@app.route("/api/config/canais/<int:canal_id>", methods=["DELETE"])
+@login_required
+def api_delete_config_canal(canal_id):
+    server_id = request.args.get("server_id")
+    if not server_id:
+        return jsonify({"error": "server_id_required"}), 400
+
+    authorized, reason = Auth.can_manage_server(server_id)
+    print("AUTH CHECK:", server_id, authorized, reason)
+    if not authorized:
+        return jsonify({"error": "unauthorized", "reason": reason}), 403
+
+    result = db.delete_config_canal(canal_id, server_id)
+    if result is None:
+        return jsonify({"error": "not_found", "message": "Canal não encontrado"}), 404
+    if not result:
+        return jsonify({"error": "cannot_delete", "message": "Canal obrigatório não pode ser excluído"}), 400
+
+    return jsonify({"success": True})
+
+@app.route("/api/patentes")
+@login_required
+def api_get_patentes():
+    server_id = request.args.get("server_id")
+    if not server_id:
+        return jsonify({"error": "server_id_required"}), 400
+
+    authorized, reason = Auth.can_manage_server(server_id)
+    print("AUTH CHECK:", server_id, authorized, reason)
+    if not authorized:
+        return jsonify({"error": "unauthorized", "reason": reason}), 403
+
+    db.ensure_default_patentes(server_id)
+    patentes = db.get_patentes(server_id)
+    return jsonify({"success": True, "data": patentes})
+
+@app.route("/api/patentes", methods=["POST"])
+@login_required
+def api_create_patente():
+    data = request.get_json()
+    if not data or "server_id" not in data or "nome" not in data:
+        return jsonify({"error": "invalid_data", "message": "server_id e nome são obrigatórios"}), 400
+
+    server_id = data["server_id"]
+    authorized, reason = Auth.can_manage_server(server_id)
+    print("AUTH CHECK:", server_id, authorized, reason)
+    if not authorized:
+        return jsonify({"error": "unauthorized", "reason": reason}), 403
+
+    role_id = data.get("role_id")
+    xp_necessario = int(data.get("xp_necessario", 0))
+    ordem = int(data.get("ordem", 0))
+    pode_excluir = int(data.get("pode_excluir", 1))
+    new_id = db.create_patente(server_id, data["nome"], role_id, xp_necessario, ordem, pode_excluir)
+
+    return jsonify({"success": True, "id": new_id, "message": "Patente criada com sucesso"})
+
+@app.route("/api/patentes/<int:patente_id>", methods=["PUT"])
+@login_required
+def api_update_patente(patente_id):
+    data = request.get_json()
+    if not data or "server_id" not in data:
+        return jsonify({"error": "invalid_data", "message": "server_id é obrigatório"}), 400
+
+    server_id = data["server_id"]
+    authorized, reason = Auth.can_manage_server(server_id)
+    print("AUTH CHECK:", server_id, authorized, reason)
+    if not authorized:
+        return jsonify({"error": "unauthorized", "reason": reason}), 403
+
+    success = db.update_patente(patente_id, server_id, data)
+    if not success:
+        return jsonify({"error": "not_found", "message": "Patente não encontrada"}), 404
+
+    return jsonify({"success": True})
+
+@app.route("/api/patentes/<int:patente_id>", methods=["DELETE"])
+@login_required
+def api_delete_patente(patente_id):
+    server_id = request.args.get("server_id")
+    if not server_id:
+        return jsonify({"error": "server_id_required"}), 400
+
+    authorized, reason = Auth.can_manage_server(server_id)
+    print("AUTH CHECK:", server_id, authorized, reason)
+    if not authorized:
+        return jsonify({"error": "unauthorized", "reason": reason}), 403
+
+    result = db.delete_patente(patente_id, server_id)
+    if result is None:
+        return jsonify({"error": "not_found", "message": "Patente não encontrada"}), 404
+    if not result:
+        return jsonify({"error": "cannot_delete", "message": "Patente fixa não pode ser excluída"}), 400
+
+    return jsonify({"success": True})
+
 @app.route("/api/config", methods=["POST"])
 @login_required
 def api_save_config():
@@ -115,9 +269,10 @@ def api_save_config():
         return jsonify({"error": "invalid_data"}), 400
 
     server_id = data["server_id"]
-    authorized, _ = Auth.can_manage_server(server_id)
+    authorized, reason = Auth.can_manage_server(server_id)
+    print("AUTH CHECK:", server_id, authorized, reason)
     if not authorized:
-        return jsonify({"error": "unauthorized"}), 403
+        return jsonify({"error": "unauthorized", "reason": reason}), 403
 
     if db.save_config(data):
         return jsonify({"success": True})
@@ -191,9 +346,10 @@ def api_get_treinos():
     if not server_id:
         return jsonify({"error": "server_id_required"}), 400
 
-    authorized, _ = Auth.can_manage_server(server_id)
+    authorized, reason = Auth.can_manage_server(server_id)
+    print("AUTH CHECK:", server_id, authorized, reason)
     if not authorized:
-        return jsonify({"error": "unauthorized"}), 403
+        return jsonify({"error": "unauthorized", "reason": reason}), 403
 
     treinos = db.get_treinos(server_id)
     return jsonify({"treinos": treinos})
