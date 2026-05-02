@@ -703,19 +703,13 @@ async def hierarchy(interaction: discord.Interaction):
         await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
         return
 
-    server_id = str(interaction.guild.id)
-    config = db.get_config(server_id)
-    lines = []
-    for index, key in enumerate(ROLE_CONFIG_KEYS, start=1):
-        role_id = config.get(key)
-        if role_id:
-            role = interaction.guild.get_role(int(role_id))
-            if role:
-                lines.append(f"{index}. {role.mention}")
-            else:
-                lines.append(f"{index}. Cargo configurado, mas não encontrado no servidor")
-        else:
-            lines.append(f"{index}. Não configurado")
+    roles = [role for role in interaction.guild.roles if role.name != "@everyone"]
+    if not roles:
+        await interaction.response.send_message("Nenhum cargo encontrado neste servidor.", ephemeral=True)
+        return
+
+    sorted_roles = sorted(roles, key=lambda role: role.position, reverse=True)
+    lines = [f"{index}. {role.mention} ({role.name})" for index, role in enumerate(sorted_roles, start=1)]
 
     await interaction.response.send_message(
         "**Hierarquia de cargos do servidor:**\n" + "\n".join(lines),
