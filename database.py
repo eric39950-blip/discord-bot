@@ -309,7 +309,7 @@ class Database:
                         xp_soldado, xp_cabo, xp_sargento, pontos_por_msg,
                         pontos_por_registro, cooldown_msg, auto_promover,
                         precisa_aprovacao, sistema_ativo, usar_dm, usar_ia
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     config["server_id"], config.get("canal_avaliacao"), config.get("canal_registro"),
                     config.get("canal_logs"), config.get("cargo_recruta"), config.get("cargo_soldado"),
