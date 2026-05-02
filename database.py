@@ -159,6 +159,35 @@ class Database:
                 )
             """)
 
+            # Tabela de config_canais (dinâmica)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS config_canais (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    server_id TEXT NOT NULL,
+                    nome TEXT NOT NULL,
+                    tipo TEXT NOT NULL,
+                    canal_id TEXT,
+                    obrigatorio INTEGER DEFAULT 0,
+                    ordem INTEGER DEFAULT 0,
+                    criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(server_id, tipo)
+                )
+            """)
+
+            # Tabela de patentes (dinâmica)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS patentes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    server_id TEXT NOT NULL,
+                    nome TEXT NOT NULL,
+                    role_id TEXT,
+                    xp_necessario INTEGER DEFAULT 0,
+                    ordem INTEGER DEFAULT 0,
+                    pode_excluir INTEGER DEFAULT 1,
+                    criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
             conn.commit()
 
     def get_config(self, server_id: str) -> Dict[str, Any]:
@@ -551,6 +580,196 @@ class Database:
             cursor.execute("""
                 UPDATE treinos SET lembrete_enviado = 1 WHERE id = ?
             """, (treino_id,))
+            conn.commit()
+
+    def get_config_canais(self, server_id: str) -> List[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM config_canais
+                WHERE server_id = ?
+                ORDER BY ordem ASC, id ASC
+            """, (server_id,))
+            columns = [desc[0] for desc in cursor.description]
+            return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+    def get_config_canal_by_tipo(self, server_id: str, tipo: str) -> Optional[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM config_canais
+                WHERE server_id = ? AND tipo = ?
+            """, (server_id, tipo))
+            row = cursor.fetchone()
+            if row:
+                columns = [desc[0] for desc in cursor.description]
+                return dict(zip(columns, row))
+            return None
+
+    def create_config_canal(self, server_id: str, nome: str, tipo: str, canal_id: Optional[str] = None, obrigatorio: int = 0, ordem: int = 0) -> int:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO config_canais (server_id, nome, tipo, canal_id, obrigatorio, ordem)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (server_id, nome, tipo, canal_id, int(obrigatorio), int(ordem)))
+            conn.commit()
+            return cursor.lastrowid
+
+    def update_config_canal(self, canal_id: int, server_id: str, data: Dict[str, Any]) -> bool:
+        allowed_keys = ["nome", "tipo", "canal_id", "obrigatorio", "ordem"]
+        fields = []
+        values = []
+        for key in allowed_keys:
+            if key in data:
+                fields.append(f"{key} = ?")
+                values.append(data[key])
+
+        if not fields:
+            return False
+
+        values.extend([canal_id, server_id])
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(f"""
+                UPDATE config_canais SET {', '.join(fields)}
+                WHERE id = ? AND server_id = ?
+            """, tuple(values))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def delete_config_canal(self, canal_id: int, server_id: str) -> Optional[bool]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT obrigatorio FROM config_canais
+                WHERE id = ? AND server_id = ?
+            """, (canal_id, server_id))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            if row[0] == 1:
+                return False
+
+            cursor.execute("""
+                DELETE FROM config_canais
+                WHERE id = ? AND server_id = ?
+            """, (canal_id, server_id))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def ensure_default_canais(self, server_id: str):
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM config_canais WHERE server_id = ?", (server_id,))
+            total = cursor.fetchone()[0] or 0
+            if total > 0:
+                return
+
+            defaults = [
+                (server_id, "Avaliação", "avaliacao", None, 1, 1),
+                (server_id, "Registro", "registro", None, 1, 2),
+                (server_id, "Logs", "logs", None, 0, 3),
+                (server_id, "Treinos", "treinos", None, 0, 4)
+            ]
+            cursor.executemany("""
+                INSERT INTO config_canais (server_id, nome, tipo, canal_id, obrigatorio, ordem)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, defaults)
+            conn.commit()
+
+    def get_patentes(self, server_id: str) -> List[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM patentes
+                WHERE server_id = ?
+                ORDER BY ordem ASC, id ASC
+            """, (server_id,))
+            columns = [desc[0] for desc in cursor.description]
+            return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+    def get_patentes_ordenadas_por_xp(self, server_id: str) -> List[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM patentes
+                WHERE server_id = ?
+                ORDER BY xp_necessario ASC, ordem ASC, id ASC
+            """, (server_id,))
+            columns = [desc[0] for desc in cursor.description]
+            return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+    def create_patente(self, server_id: str, nome: str, role_id: Optional[str] = None, xp_necessario: int = 0, ordem: int = 0, pode_excluir: int = 1) -> int:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO patentes (server_id, nome, role_id, xp_necessario, ordem, pode_excluir)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (server_id, nome, role_id, int(xp_necessario), int(ordem), int(pode_excluir)))
+            conn.commit()
+            return cursor.lastrowid
+
+    def update_patente(self, patente_id: int, server_id: str, data: Dict[str, Any]) -> bool:
+        allowed_keys = ["nome", "role_id", "xp_necessario", "ordem", "pode_excluir"]
+        fields = []
+        values = []
+        for key in allowed_keys:
+            if key in data:
+                fields.append(f"{key} = ?")
+                values.append(data[key])
+
+        if not fields:
+            return False
+
+        values.extend([patente_id, server_id])
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(f"""
+                UPDATE patentes SET {', '.join(fields)}
+                WHERE id = ? AND server_id = ?
+            """, tuple(values))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def delete_patente(self, patente_id: int, server_id: str) -> Optional[bool]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT pode_excluir FROM patentes
+                WHERE id = ? AND server_id = ?
+            """, (patente_id, server_id))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            if row[0] == 0:
+                return False
+
+            cursor.execute("""
+                DELETE FROM patentes
+                WHERE id = ? AND server_id = ?
+            """, (patente_id, server_id))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def ensure_default_patentes(self, server_id: str):
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM patentes WHERE server_id = ?", (server_id,))
+            total = cursor.fetchone()[0] or 0
+            if total > 0:
+                return
+
+            defaults = [
+                (server_id, "Recruta", None, 0, 1, 0),
+                (server_id, "Soldado", None, 100, 2, 1),
+                (server_id, "Cabo", None, 300, 3, 1),
+                (server_id, "Sargento", None, 600, 4, 1)
+            ]
+            cursor.executemany("""
+                INSERT INTO patentes (server_id, nome, role_id, xp_necessario, ordem, pode_excluir)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, defaults)
             conn.commit()
 
 # Instância global
