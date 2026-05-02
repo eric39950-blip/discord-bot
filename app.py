@@ -397,8 +397,10 @@ def api_create_treino():
     descricao = data.get("descricao", "")
     horario_inicio = data.get("horario_inicio", "")
     canal_id = data.get("canal_id", "")
+    pontos = int(data.get("pontos", 2)) if data.get("pontos") is not None else 2
+    target_role_id = data.get("target_role_id", "")
 
-    treino_id = db.create_treino(server_id, str(session["user"]["id"]), titulo, descricao, horario_inicio, canal_id)
+    treino_id = db.create_treino(server_id, str(session["user"]["id"]), titulo, descricao, horario_inicio, canal_id, pontos, target_role_id)
     treino = db.get_treino(treino_id)
 
     return jsonify({"treino": treino})
