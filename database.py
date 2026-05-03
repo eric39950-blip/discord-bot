@@ -31,6 +31,7 @@ class Database:
                     cargo_sargento TEXT,
                     cargo_ping_treinos TEXT,
                     canal_treinos TEXT,
+                    canal_eventos TEXT,
                     canal_inatividade TEXT,
                     canal_logs_treino TEXT,
                     pontos_por_treino INTEGER DEFAULT 2,
@@ -57,6 +58,8 @@ class Database:
                     logs_tickets_enabled INTEGER DEFAULT 1,
                     logs_xp_channel_id TEXT,
                     logs_xp_enabled INTEGER DEFAULT 1,
+                    logs_staff_channel_id TEXT,
+                    logs_staff_enabled INTEGER DEFAULT 1,
                     -- Novos campos de DM
                     dm_promocoes_enabled INTEGER DEFAULT 1,
                     dm_eventos_enabled INTEGER DEFAULT 0,
@@ -283,6 +286,7 @@ class Database:
                 "cargo_sargento": None,
                 "cargo_ping_treinos": None,
                 "canal_treinos": None,
+                "canal_eventos": None,
                 "canal_inatividade": None,
                 "canal_logs_treino": None,
                 "pontos_por_treino": 2,
@@ -308,6 +312,8 @@ class Database:
                 "logs_tickets_enabled": 1,
                 "logs_xp_channel_id": None,
                 "logs_xp_enabled": 1,
+                "logs_staff_channel_id": None,
+                "logs_staff_enabled": 1,
                 "dm_promocoes_enabled": 1,
                 "dm_eventos_enabled": 0,
                 "dm_tickets_enabled": 0,
@@ -349,7 +355,7 @@ class Database:
                     config["server_id"], config.get("canal_avaliacao"), config.get("canal_registro"),
                     config.get("canal_logs"), config.get("cargo_recruta"), config.get("cargo_soldado"),
                     config.get("cargo_cabo"), config.get("cargo_sargento"), config.get("cargo_ping_treinos"),
-                    config.get("canal_treinos"), config.get("canal_inatividade"), config.get("canal_logs_treino"),
+                    config.get("canal_treinos"), config.get("canal_eventos"), config.get("canal_inatividade"), config.get("canal_logs_treino"),
                     config.get("pontos_por_treino", 2), config.get("cargo_verificado"),
                     config.get("lembrete_treino_minutos", 30), config.get("dm_treinos", 1),
                     config.get("xp_soldado", 100), config.get("xp_cabo", 300), config.get("xp_sargento", 600),
@@ -361,6 +367,7 @@ class Database:
                     config.get("logs_eventos_channel_id"), config.get("logs_eventos_enabled", 1),
                     config.get("logs_tickets_channel_id"), config.get("logs_tickets_enabled", 1),
                     config.get("logs_xp_channel_id"), config.get("logs_xp_enabled", 1),
+                    config.get("logs_staff_channel_id"), config.get("logs_staff_enabled", 1),
                     config.get("dm_promocoes_enabled", 1), config.get("dm_eventos_enabled", 0),
                     config.get("dm_tickets_enabled", 0), config.get("dm_staff_enabled", 0),
                     config.get("logs_eventos_respostas_enabled", 1)
@@ -1028,4 +1035,16 @@ class Database:
         }
 
 # Instância global
+    def disable_all_dm(self, server_id: str) -> bool:
+        try:
+            config = self.get_config(server_id)
+            config["dm_promocoes_enabled"] = 0
+            config["dm_eventos_enabled"] = 0
+            config["dm_tickets_enabled"] = 0
+            config["dm_staff_enabled"] = 0
+            return self.save_config(config)
+        except Exception as e:
+            print(f"Erro ao desativar todas DMs: {e}")
+            return False
+
 db = Database()
