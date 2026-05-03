@@ -403,7 +403,7 @@ class TreinoConfirmView(discord.ui.View):
         db.create_or_update_user(self.server_id, discord_id, str(interaction.user))
         db.update_last_activity(self.server_id, discord_id)
         await self.refresh_embed(interaction.message)
-        await interaction.response.send_message("✅ Resposta registrada: Vou! Seus pontos serão concedidos apenas no resultado do treino.", ephemeral=True)
+        await interaction.response.send_message("✅ Resposta registrada: Vou! Seus pontos serão concedidos apenas no resultado do evento.", ephemeral=True)
 
     @discord.ui.button(label="🤔 Talvez", style=discord.ButtonStyle.secondary)
     async def confirm_talvez(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -417,7 +417,7 @@ class TreinoConfirmView(discord.ui.View):
         db.create_or_update_user(self.server_id, discord_id, str(interaction.user))
         db.update_last_activity(self.server_id, discord_id)
         await self.refresh_embed(interaction.message)
-        await interaction.response.send_message("🤔 Resposta registrada: Talvez! Seus pontos serão concedidos apenas no resultado do treino.", ephemeral=True)
+        await interaction.response.send_message("🤔 Resposta registrada: Talvez! Seus pontos serão concedidos apenas no resultado do evento.", ephemeral=True)
 
     @discord.ui.button(label="❌ Não vou", style=discord.ButtonStyle.danger)
     async def confirm_nao(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -431,7 +431,7 @@ class TreinoConfirmView(discord.ui.View):
         db.create_or_update_user(self.server_id, discord_id, str(interaction.user))
         db.update_last_activity(self.server_id, discord_id)
         await self.refresh_embed(interaction.message)
-        await interaction.response.send_message("❌ Resposta registrada: Não vou! Seus pontos serão concedidos apenas no resultado do treino.", ephemeral=True)
+        await interaction.response.send_message("❌ Resposta registrada: Não vou! Seus pontos serão concedidos apenas no resultado do evento.", ephemeral=True)
 
 @bot.event
 async def on_ready():
@@ -997,7 +997,6 @@ async def help(interaction: discord.Interaction):
     embed.add_field(name="/resultadotreino", value="Registra resultado de um evento e distribui pontos", inline=False)
     embed.add_field(name="/set_inactivity_channel", value="Define o canal para encaminhar respostas de inatividade (staff)", inline=False)
     embed.add_field(name="/set_message_points", value="Define pontos por mensagem no chat (staff)", inline=False)
-    embed.add_field(name="/set_treino_points", value="Define pontos por presença em treino (staff)", inline=False)
     embed.add_field(name="/hierarchy", value="Mostra cargos/hierarquia do servidor", inline=False)
     embed.add_field(name="+registro treino", value="Registra treino e notifica membros (staff)", inline=False)
     await interaction.response.send_message(embed=embed)
@@ -1208,8 +1207,8 @@ async def setup_logs(interaction: discord.Interaction):
     await send_log_embed(interaction.guild, log_embed)
 
 @bot.tree.command(name="setup_logs_treino", description="Configura canal de logs para treinos/eventos (staff)")
-@app_commands.describe(channel="Canal onde os resultados de treinos/eventos serão enviados")
-async def setup_logs_treino(interaction: discord.Interaction, channel: discord.TextChannel):
+@app_commands.describe(channel="Canal onde os resultados de treinos/eventos serão enviados", disable_dm="Desativar notificações DM para treinos")
+async def setup_logs_treino(interaction: discord.Interaction, channel: discord.TextChannel, disable_dm: bool = False):
     if not interaction.user.guild_permissions.manage_channels:
         await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
         return
@@ -1217,9 +1216,11 @@ async def setup_logs_treino(interaction: discord.Interaction, channel: discord.T
     server_id = str(interaction.guild.id)
     config = db.get_config(server_id)
     config["canal_logs_treino"] = str(channel.id)
+    config["dm_treinos"] = 0 if disable_dm else 1
     db.save_config(config)
 
-    await interaction.response.send_message(f"✅ Canal de logs de treinos/eventos definido como {channel.mention}.", ephemeral=True)
+    dm_status = "desativadas" if disable_dm else "ativadas"
+    await interaction.response.send_message(f"✅ Canal de logs de treinos/eventos definido como {channel.mention}. Notificações DM {dm_status}.", ephemeral=True)
 
 @bot.tree.command(name="close", description="Fecha o ticket atual (staff)")
 async def close(interaction: discord.Interaction):
@@ -1359,7 +1360,7 @@ async def novo_evento(interaction: discord.Interaction):
 class ResultadoTreinoModal(discord.ui.Modal, title="Resultado do Evento"):
     treino_id = discord.ui.TextInput(label="ID do treino", style=discord.TextStyle.short, required=True)
     resultado = discord.ui.TextInput(label="Resumo do resultado", style=discord.TextStyle.paragraph, required=True)
-    participantes = discord.ui.TextInput(label="Membros que participaram (mentions ou IDs)", style=discord.TextStyle.paragraph, required=False, placeholder="Deixe em branco para usar quem marcou 'vou'")
+    participantes = discord.ui.TextInput(label="Membros que participaram (opcional)", style=discord.TextStyle.paragraph, required=False, placeholder="Deixe em branco para usar quem marcou 'vou'. Ou mencione @usuários.")
     pontos = discord.ui.TextInput(label="Pontos por participante", style=discord.TextStyle.short, required=True, default="2")
 
     def __init__(self, interaction: discord.Interaction):
@@ -1432,26 +1433,21 @@ class ResultadoTreinoModal(discord.ui.Modal, title="Resultado do Evento"):
         log_embed.set_footer(text=f"Registrado por {interaction.user.display_name}")
         await send_treino_log_embed(interaction.guild, log_embed)
 
-        treino_channel = interaction.guild.get_channel(int(treino["canal_id"])) if treino.get("canal_id") else None
-        if treino_channel and treino.get("mensagem_id"):
-            try:
-                treino_message = await treino_channel.fetch_message(int(treino["mensagem_id"]))
-                result_embed = discord.Embed(
-                    title="Resultado do Evento",
-                    description=treino.get("descricao", ""),
-                    color=discord.Color.green()
-                )
-                result_embed.add_field(name="Resultado", value=self.resultado.value, inline=False)
-                result_embed.add_field(name="ID do Evento", value=str(treino_id), inline=True)
-                result_embed.add_field(name="Vão", value=str(count_vou), inline=True)
-                result_embed.add_field(name="Talvez", value=str(count_talvez), inline=True)
-                result_embed.add_field(name="Não vão", value=str(count_nao), inline=True)
-                result_embed.add_field(name="Participantes que compareceram", value=str(awarded_count), inline=True)
-                result_embed.add_field(name="Pontos por participante", value=str(points), inline=True)
-                result_embed.set_footer(text=f"Registrado por {interaction.user.display_name}")
-                await treino_message.edit(embed=result_embed, view=None)
-            except Exception:
-                pass
+        if treino_channel:
+            result_embed = discord.Embed(
+                title="Resultado do Evento",
+                description=treino.get("descricao", ""),
+                color=discord.Color.green()
+            )
+            result_embed.add_field(name="Resultado", value=self.resultado.value, inline=False)
+            result_embed.add_field(name="ID do Evento", value=str(treino_id), inline=True)
+            result_embed.add_field(name="Vão", value=str(count_vou), inline=True)
+            result_embed.add_field(name="Talvez", value=str(count_talvez), inline=True)
+            result_embed.add_field(name="Não vão", value=str(count_nao), inline=True)
+            result_embed.add_field(name="Participantes que compareceram", value=str(awarded_count), inline=True)
+            result_embed.add_field(name="Pontos por participante", value=str(points), inline=True)
+            result_embed.set_footer(text=f"Registrado por {interaction.user.display_name}")
+            await treino_channel.send(embed=result_embed)
 
         await interaction.response.send_message(f"✅ Resultado registrado. {awarded_count} participantes receberam {points} pontos.", ephemeral=True)
 
@@ -1493,24 +1489,6 @@ async def set_message_points(interaction: discord.Interaction, amount: int):
     db.save_config(config)
 
     await interaction.response.send_message(f"✅ Pontos por mensagem definidos para {amount}.", ephemeral=True)
-
-@bot.tree.command(name="set_treino_points", description="Define quantos pontos por presença em treino (staff)")
-@app_commands.describe(amount="Quantidade de pontos por presença em treino")
-async def set_treino_points(interaction: discord.Interaction, amount: int):
-    if not interaction.user.guild_permissions.manage_roles:
-        await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
-        return
-
-    if amount < 0:
-        await interaction.response.send_message("❌ O valor precisa ser zero ou positivo.", ephemeral=True)
-        return
-
-    server_id = str(interaction.guild.id)
-    config = db.get_config(server_id)
-    config["pontos_por_treino"] = amount
-    db.save_config(config)
-
-    await interaction.response.send_message(f"✅ Pontos por presença em treino definidos para {amount}.", ephemeral=True)
 
 @bot.tree.command(name="last_active", description="Mostra quando um usuário falou por último")
 @app_commands.describe(user="Usuário para verificar")
