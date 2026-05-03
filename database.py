@@ -1154,6 +1154,57 @@ class Database:
             "enabled": config.get(enabled_key, 1) == 1
         }
 
+    def set_xp_config(self, server_id: str, pontos_por_msg=None, pontos_por_registro=None, cooldown_msg=None, sistema_ativo=None):
+        """Atualiza configurações de XP de forma segura."""
+        self.ensure_config(server_id)
+        updates = []
+        values = []
+        if pontos_por_msg is not None:
+            updates.append("pontos_por_msg = ?")
+            values.append(pontos_por_msg)
+        if pontos_por_registro is not None:
+            updates.append("pontos_por_registro = ?")
+            values.append(pontos_por_registro)
+        if cooldown_msg is not None:
+            updates.append("cooldown_msg = ?")
+            values.append(cooldown_msg)
+        if sistema_ativo is not None:
+            updates.append("sistema_ativo = ?")
+            values.append(sistema_ativo)
+        if not updates:
+            return True
+        values.append(server_id)
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"UPDATE configuracoes SET {', '.join(updates)} WHERE server_id = ?",
+                values
+            )
+            conn.commit()
+        return True
+
+    def get_last_event_activity(self, server_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+        """Retorna a última atividade em evento para um usuário."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT tr.titulo, tr.criado_em, tr_res.resposta, tr_res.criado_em as resposta_criado_em
+                FROM treino_respostas tr_res
+                JOIN treinos tr ON tr.id = tr_res.treino_id
+                WHERE tr_res.server_id = ? AND tr_res.discord_id = ? AND tr.status != 'cancelado'
+                ORDER BY tr_res.criado_em DESC
+                LIMIT 1
+            """, (server_id, user_id))
+            row = cursor.fetchone()
+            if row:
+                return {
+                    "titulo": row[0],
+                    "treino_criado_em": row[1],
+                    "resposta": row[2],
+                    "resposta_criado_em": row[3]
+                }
+        return None
+
     def set_dm_enabled(self, server_id: str, dm_type: str, enabled: bool) -> bool:
         """Ativa/desativa DM para um tipo específico."""
         field_name = f"dm_{dm_type}_enabled"
