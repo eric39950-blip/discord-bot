@@ -1087,6 +1087,7 @@ class Database:
         self.ensure_config(server_id)
         channel_mapping = {
             "geral": "logs_gerais_channel_id",
+            "gerais": "logs_gerais_channel_id",
             "xp": "logs_xp_channel_id",
             "staff": "logs_staff_channel_id",
             "ticket": "logs_tickets_channel_id",
@@ -1114,6 +1115,7 @@ class Database:
         self.ensure_config(server_id)
         enabled_mapping = {
             "geral": "logs_gerais_enabled",
+            "gerais": "logs_gerais_enabled",
             "xp": "logs_xp_enabled",
             "staff": "logs_staff_enabled",
             "ticket": "logs_tickets_enabled",
@@ -1141,6 +1143,7 @@ class Database:
         config = self.get_config(server_id)
         channel_mapping = {
             "geral": "logs_gerais_channel_id",
+            "gerais": "logs_gerais_channel_id",
             "xp": "logs_xp_channel_id",
             "staff": "logs_staff_channel_id",
             "ticket": "logs_tickets_channel_id",
@@ -1152,6 +1155,7 @@ class Database:
         }
         enabled_mapping = {
             "geral": "logs_gerais_enabled",
+            "gerais": "logs_gerais_enabled",
             "xp": "logs_xp_enabled",
             "staff": "logs_staff_enabled",
             "ticket": "logs_tickets_enabled",
