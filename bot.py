@@ -20,29 +20,27 @@ bot = commands.Bot(command_prefix=None, intents=intents, help_command=None)
 ROLE_CONFIG_KEYS = ["cargo_recruta", "cargo_soldado", "cargo_cabo", "cargo_sargento"]
 ROLE_SUFFIXES = ["recruta", "soldado", "cabo", "sargento"]
 
-async def send_log_embed(guild: discord.Guild, embed: discord.Embed):
-    config = db.get_config(str(guild.id))
-    canal_logs = config.get("canal_logs")
-    if not canal_logs:
-        return
-    channel = guild.get_channel(int(canal_logs))
-    if channel:
-        try:
+async def send_log(guild: discord.Guild, log_type: str, embed: discord.Embed = None, content: str = None):
+    """Envia log para o canal configurado do tipo especificado."""
+    try:
+        log_config = db.get_log_config(str(guild.id), log_type)
+        if not log_config["enabled"]:
+            return
+        
+        channel_id = log_config["channel_id"]
+        if not channel_id:
+            return
+        
+        channel = guild.get_channel(int(channel_id))
+        if not channel:
+            return
+        
+        if embed:
             await channel.send(embed=embed)
-        except:
-            pass
-
-async def send_treino_log_embed(guild: discord.Guild, embed: discord.Embed):
-    config = db.get_config(str(guild.id))
-    canal_logs_treino = config.get("canal_logs_treino")
-    if not canal_logs_treino:
-        return
-    channel = guild.get_channel(int(canal_logs_treino))
-    if channel:
-        try:
-            await channel.send(embed=embed)
-        except:
-            pass
+        elif content:
+            await channel.send(content)
+    except Exception as e:
+        print(f"Erro ao enviar log {log_type}: {e}")
 
 
 def parse_role_from_input(guild: discord.Guild, raw_text: str) -> Optional[discord.Role]:
@@ -233,6 +231,173 @@ class LogsEventoView(discord.ui.View):
         )
         button.label = "✅ Notificações DM Eventos" if config["dm_treinos"] == 1 else "🏆 Notificações DM Eventos"
 
+class LogsGeralView(discord.ui.View):
+    def __init__(self, guild_id: str):
+        super().__init__(timeout=None)
+        self.guild_id = guild_id
+
+    @discord.ui.button(label="📝 Ativar Logs Gerais", style=discord.ButtonStyle.green)
+    async def ativar_logs_gerais(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.manage_channels:
+            await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+            return
+        
+        server_id = str(interaction.guild.id)
+        db.set_log_enabled(server_id, "gerais", True)
+        
+        embed = discord.Embed(
+            title="📝 Sistema de Logs Gerais",
+            description="Logs gerais configurados neste canal.",
+            color=discord.Color.blue()
+        )
+        embed.add_field(name="Status", value="✅ Ativado", inline=True)
+        embed.add_field(name="Canal", value=interaction.channel.mention, inline=True)
+        embed.set_footer(text="Logs de promoções, configurações e ações administrativas")
+        
+        await interaction.response.edit_message(embed=embed, view=self)
+        await interaction.followup.send("✅ Logs gerais ativados!", ephemeral=True)
+
+    @discord.ui.button(label="🚫 Desativar Logs Gerais", style=discord.ButtonStyle.red)
+    async def desativar_logs_gerais(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.manage_channels:
+            await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+            return
+        
+        server_id = str(interaction.guild.id)
+        db.set_log_enabled(server_id, "gerais", False)
+        
+        embed = discord.Embed(
+            title="📝 Sistema de Logs Gerais",
+            description="Logs gerais configurados neste canal.",
+            color=discord.Color.blue()
+        )
+        embed.add_field(name="Status", value="❌ Desativado", inline=True)
+        embed.add_field(name="Canal", value=interaction.channel.mention, inline=True)
+        embed.set_footer(text="Logs de promoções, configurações e ações administrativas")
+        
+        await interaction.response.edit_message(embed=embed, view=self)
+        await interaction.followup.send("🚫 Logs gerais desativados!", ephemeral=True)
+
+class LogsTicketView(discord.ui.View):
+    def __init__(self, guild_id: str):
+        super().__init__(timeout=None)
+        self.guild_id = guild_id
+
+    @discord.ui.button(label="🎫 Ativar Logs de Tickets", style=discord.ButtonStyle.green)
+    async def ativar_logs_tickets(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.manage_channels:
+            await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+            return
+        
+        server_id = str(interaction.guild.id)
+        db.set_log_enabled(server_id, "tickets", True)
+        
+        embed = discord.Embed(
+            title="🎫 Sistema de Logs de Tickets",
+            description="Logs de tickets configurados neste canal.",
+            color=discord.Color.purple()
+        )
+        embed.add_field(name="Status", value="✅ Ativado", inline=True)
+        embed.add_field(name="Canal", value=interaction.channel.mention, inline=True)
+        embed.set_footer(text="Logs de abertura e fechamento de tickets")
+        
+        await interaction.response.edit_message(embed=embed, view=self)
+        await interaction.followup.send("✅ Logs de tickets ativados!", ephemeral=True)
+
+    @discord.ui.button(label="🚫 Desativar Logs de Tickets", style=discord.ButtonStyle.red)
+    async def desativar_logs_tickets(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.manage_channels:
+            await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+            return
+        
+        server_id = str(interaction.guild.id)
+        db.set_log_enabled(server_id, "tickets", False)
+        
+        embed = discord.Embed(
+            title="🎫 Sistema de Logs de Tickets",
+            description="Logs de tickets configurados neste canal.",
+            color=discord.Color.purple()
+        )
+        embed.add_field(name="Status", value="❌ Desativado", inline=True)
+        embed.add_field(name="Canal", value=interaction.channel.mention, inline=True)
+        embed.set_footer(text="Logs de abertura e fechamento de tickets")
+        
+        await interaction.response.edit_message(embed=embed, view=self)
+        await interaction.followup.send("🚫 Logs de tickets desativados!", ephemeral=True)
+
+class DMConfigView(discord.ui.View):
+    def __init__(self, guild_id: str):
+        super().__init__(timeout=None)
+        self.guild_id = guild_id
+
+    @discord.ui.button(label="👑 DM Promoções", style=discord.ButtonStyle.blurple)
+    async def toggle_dm_promocoes(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.manage_channels:
+            await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+            return
+        
+        server_id = str(interaction.guild.id)
+        dm_config = db.get_dm_config(server_id)
+        new_status = not dm_config["promocoes"]
+        db.set_dm_enabled(server_id, "promocoes", new_status)
+        
+        status_text = "✅ Ativado" if new_status else "❌ Desativado"
+        button.label = f"👑 DM Promoções {status_text}"
+        await interaction.response.edit_message(view=self)
+        await interaction.followup.send(f"DM de promoções {status_text.lower()}!", ephemeral=True)
+
+    @discord.ui.button(label="🏆 DM Eventos", style=discord.ButtonStyle.blurple)
+    async def toggle_dm_eventos(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.manage_channels:
+            await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+            return
+        
+        server_id = str(interaction.guild.id)
+        dm_config = db.get_dm_config(server_id)
+        new_status = not dm_config["eventos"]
+        db.set_dm_enabled(server_id, "eventos", new_status)
+        
+        status_text = "✅ Ativado" if new_status else "❌ Desativado"
+        button.label = f"🏆 DM Eventos {status_text}"
+        await interaction.response.edit_message(view=self)
+        await interaction.followup.send(f"DM de eventos {status_text.lower()}!", ephemeral=True)
+
+    @discord.ui.button(label="🎫 DM Tickets", style=discord.ButtonStyle.blurple)
+    async def toggle_dm_tickets(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.manage_channels:
+            await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+            return
+        
+        server_id = str(interaction.guild.id)
+        dm_config = db.get_dm_config(server_id)
+        new_status = not dm_config["tickets"]
+        db.set_dm_enabled(server_id, "tickets", new_status)
+        
+        status_text = "✅ Ativado" if new_status else "❌ Desativado"
+        button.label = f"🎫 DM Tickets {status_text}"
+        await interaction.response.edit_message(view=self)
+        await interaction.followup.send(f"DM de tickets {status_text.lower()}!", ephemeral=True)
+
+    @discord.ui.button(label="🚫 Desativar Todos DM", style=discord.ButtonStyle.red)
+    async def desativar_todos_dm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.manage_channels:
+            await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+            return
+        
+        server_id = str(interaction.guild.id)
+        db.set_dm_enabled(server_id, "promocoes", False)
+        db.set_dm_enabled(server_id, "eventos", False)
+        db.set_dm_enabled(server_id, "tickets", False)
+        db.set_dm_enabled(server_id, "staff", False)
+        
+        # Atualizar labels dos botões
+        for child in self.children:
+            if hasattr(child, 'label') and child.label.startswith(("👑", "🏆", "🎫")):
+                child.label = child.label.split(" ")[0] + " " + child.label.split(" ")[1] + " ❌ Desativado"
+        
+        await interaction.response.edit_message(view=self)
+        await interaction.followup.send("🚫 Todos os DMs desativados!", ephemeral=True)
+
 class TicketView(discord.ui.View):
     @discord.ui.button(label="🎫 Abrir Ticket", style=discord.ButtonStyle.primary)
     async def open_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -360,7 +525,7 @@ class TicketView(discord.ui.View):
             color=discord.Color.orange()
         )
         log_embed.add_field(name="Canal", value=f"[Ir para o ticket]({channel.jump_url})", inline=False)
-        await send_log_embed(guild, log_embed)
+        await send_log(guild, "ticket", embed=log_embed)
         
         await interaction.response.send_message("✅ Ticket criado! Verifique o canal criado.", ephemeral=True)
 
@@ -427,6 +592,21 @@ class TreinoConfirmView(discord.ui.View):
         db.create_or_update_user(self.server_id, discord_id, str(interaction.user))
         db.update_last_activity(self.server_id, discord_id)
         await self.refresh_embed(interaction.message)
+        
+        # Log de resposta se habilitado
+        config = db.get_config(self.server_id)
+        if config.get("logs_eventos_respostas_enabled", 1):
+            treino = db.get_treino(self.treino_id)
+            log_embed = discord.Embed(
+                title="Resposta de Evento",
+                description=f"{interaction.user.mention} respondeu **Vou** ao evento",
+                color=discord.Color.green()
+            )
+            log_embed.add_field(name="Evento", value=treino.get("titulo", treino.get("descricao", "Sem título")), inline=False)
+            log_embed.add_field(name="ID do Evento", value=str(self.treino_id), inline=True)
+            log_embed.set_footer(text=f"Resposta registrada")
+            await send_log(interaction.guild, "evento", embed=log_embed)
+        
         await interaction.response.send_message("✅ Resposta registrada: Vou! Seus pontos serão concedidos apenas no resultado do evento.", ephemeral=True)
 
     @discord.ui.button(label="🤔 Talvez", style=discord.ButtonStyle.secondary)
@@ -441,6 +621,21 @@ class TreinoConfirmView(discord.ui.View):
         db.create_or_update_user(self.server_id, discord_id, str(interaction.user))
         db.update_last_activity(self.server_id, discord_id)
         await self.refresh_embed(interaction.message)
+        
+        # Log de resposta se habilitado
+        config = db.get_config(self.server_id)
+        if config.get("logs_eventos_respostas_enabled", 1):
+            treino = db.get_treino(self.treino_id)
+            log_embed = discord.Embed(
+                title="Resposta de Evento",
+                description=f"{interaction.user.mention} respondeu **Talvez** ao evento",
+                color=discord.Color.yellow()
+            )
+            log_embed.add_field(name="Evento", value=treino.get("titulo", treino.get("descricao", "Sem título")), inline=False)
+            log_embed.add_field(name="ID do Evento", value=str(self.treino_id), inline=True)
+            log_embed.set_footer(text=f"Resposta registrada")
+            await send_log(interaction.guild, "evento", embed=log_embed)
+        
         await interaction.response.send_message("🤔 Resposta registrada: Talvez! Seus pontos serão concedidos apenas no resultado do evento.", ephemeral=True)
 
     @discord.ui.button(label="❌ Não vou", style=discord.ButtonStyle.danger)
@@ -455,6 +650,21 @@ class TreinoConfirmView(discord.ui.View):
         db.create_or_update_user(self.server_id, discord_id, str(interaction.user))
         db.update_last_activity(self.server_id, discord_id)
         await self.refresh_embed(interaction.message)
+        
+        # Log de resposta se habilitado
+        config = db.get_config(self.server_id)
+        if config.get("logs_eventos_respostas_enabled", 1):
+            treino = db.get_treino(self.treino_id)
+            log_embed = discord.Embed(
+                title="Resposta de Evento",
+                description=f"{interaction.user.mention} respondeu **Não vou** ao evento",
+                color=discord.Color.red()
+            )
+            log_embed.add_field(name="Evento", value=treino.get("titulo", treino.get("descricao", "Sem título")), inline=False)
+            log_embed.add_field(name="ID do Evento", value=str(self.treino_id), inline=True)
+            log_embed.set_footer(text=f"Resposta registrada")
+            await send_log(interaction.guild, "evento", embed=log_embed)
+        
         await interaction.response.send_message("❌ Resposta registrada: Não vou! Seus pontos serão concedidos apenas no resultado do evento.", ephemeral=True)
 
 @bot.event
@@ -722,7 +932,7 @@ async def on_message(message):
                 description=f"{message.author.mention} ganhou {xp} XP por mensagem.",
                 color=discord.Color.green()
             )
-            await send_log_embed(message.guild, log_embed)
+            await send_log(message.guild, "xp", embed=log_embed)
         await check_promotion(message.guild, message.author, config)
 
     except Exception as e:
@@ -1001,48 +1211,85 @@ async def addxp(interaction: discord.Interaction, user: discord.Member, amount: 
 
 @bot.tree.command(name="help", description="Mostra ajuda")
 async def help(interaction: discord.Interaction):
-    embed = discord.Embed(title="Ajuda do Bot", description="Comandos disponíveis:")
-    embed.add_field(name="/xp", value="Mostra seu XP atual", inline=False)
-    embed.add_field(name="/ranking", value="Exibe o ranking de XP", inline=False)
-    embed.add_field(name="/addxp", value="Adiciona XP a um usuário (staff)", inline=False)
-    embed.add_field(name="/user", value="Ver perfil/XP de um usuário", inline=False)
-    embed.add_field(name="/promote", value="Promover usuário manualmente (staff)", inline=False)
-    embed.add_field(name="/demote", value="Rebaixar usuário (staff)", inline=False)
-    embed.add_field(name="/clear-xp", value="Limpar XP de um usuário (staff)", inline=False)
-    embed.add_field(name="/setup_ticket", value="Configura sistema de tickets (staff)", inline=False)
-    embed.add_field(name="/setup_logs", value="Configura notificações de eventos (staff)", inline=False)
-    embed.add_field(name="/setup_logs_evento", value="Configura notificações de eventos (staff)", inline=False)
-    embed.add_field(name="/close", value="Fecha ticket (staff)", inline=False)
-    embed.add_field(name="/set_ping_treinos", value="Define cargo para ping de treinos (staff)", inline=False)
-    embed.add_field(name="/set_verified_role", value="Define o cargo de verificado para tickets", inline=False)
-    embed.add_field(name="/last_active", value="Mostra quando um usuário falou por último", inline=False)
-    embed.add_field(name="/activity_status", value="Mostra atividade em treinos e em chat", inline=False)
-    embed.add_field(name="/novo_evento", value="Cria um novo evento via formulário modal (staff)", inline=False)
-    embed.add_field(name="/resultadotreino", value="Registra resultado de um evento e distribui pontos", inline=False)
-    embed.add_field(name="/set_inactivity_channel", value="Define o canal para encaminhar respostas de inatividade (staff)", inline=False)
-    embed.add_field(name="/set_message_points", value="Define pontos por mensagem no chat (staff)", inline=False)
-    embed.add_field(name="/hierarchy", value="Mostra cargos/hierarquia do servidor", inline=False)
-    embed.add_field(name="+registro treino", value="Registra treino e notifica membros (staff)", inline=False)
+    embed = discord.Embed(
+        title="🤖 Ajuda do Bot",
+        description="Sistema completo de gerenciamento Discord com XP, patentes, eventos e tickets.",
+        color=discord.Color.blue()
+    )
+    
+    embed.add_field(
+        name="📌 Configuração",
+        value="`/setup_logs` - Logs gerais (promoções, configs)\n"
+              "`/setup_logs_evento` - Logs de eventos/treinos\n"
+              "`/setup_logs_ticket` - Logs de tickets\n"
+              "`/setup_dm` - Configurar notificações DM\n"
+              "`/set_verified_role` - Cargo verificado para tickets\n"
+              "`/set_ping_treinos` - Cargo para ping de eventos",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="⭐ XP e Patentes",
+        value="`/xp` - Ver seu XP atual\n"
+              "`/ranking` - Ranking de XP\n"
+              "`/addxp` - Adicionar XP (staff)\n"
+              "`/promote` - Promover manualmente (staff)\n"
+              "`/demote` - Rebaixar (staff)\n"
+              "`/clear-xp` - Limpar XP (staff)\n"
+              "`/hierarchy` - Ver hierarquia de patentes",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="🏆 Eventos",
+        value="`/novo_evento` - Criar evento via modal\n"
+              "`/resultadotreino` - Registrar resultado e distribuir pontos\n"
+              "`/eventos` - Listar eventos ativos",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="🎫 Tickets",
+        value="`/setup_ticket` - Configurar sistema de tickets\n"
+              "`/close` - Fechar ticket atual",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="📊 Atividade",
+        value="`/last_active` - Quando usuário falou por último\n"
+              "`/activity_status` - Atividade em chat + eventos\n"
+              "`/user` - Perfil/XP de usuário",
+        inline=False
+    )
+    
+    embed.set_footer(text="Use /comando para mais detalhes sobre cada função")
     await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="hierarchy", description="Mostra cargos/hierarquia do servidor")
+@bot.tree.command(name="hierarchy", description="Mostra hierarquia de patentes do servidor")
 async def hierarchy(interaction: discord.Interaction):
-    if not interaction.user.guild_permissions.manage_roles:
-        await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+    server_id = str(interaction.guild.id)
+    patentes = db.get_patentes_ordenadas_por_xp(server_id)
+    
+    if not patentes:
+        await interaction.response.send_message("📊 Nenhuma patente configurada neste servidor.", ephemeral=True)
         return
-
-    roles = [role for role in interaction.guild.roles if role.name != "@everyone"]
-    if not roles:
-        await interaction.response.send_message("Nenhum cargo encontrado neste servidor.", ephemeral=True)
-        return
-
-    sorted_roles = sorted(roles, key=lambda role: role.position, reverse=True)
-    lines = [f"{index}. {role.mention} ({role.name})" for index, role in enumerate(sorted_roles, start=1)]
-
-    await interaction.response.send_message(
-        "**Hierarquia de cargos do servidor:**\n" + "\n".join(lines),
-        ephemeral=True
+    
+    embed = discord.Embed(
+        title="📊 Hierarquia do Servidor",
+        description="Patentes organizadas por XP necessário",
+        color=discord.Color.gold()
     )
+    
+    for patente in patentes:
+        role_mention = f"<@&{patente['role_id']}>" if patente['role_id'] else "Cargo não configurado"
+        embed.add_field(
+            name=f"{patente['nome']}",
+            value=f"⭐ {patente['xp_necessario']} XP — {role_mention}",
+            inline=False
+        )
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="user", description="Ver perfil/XP de um usuário")
 @app_commands.describe(user="Usuário")
@@ -1180,95 +1427,129 @@ async def setup_ticket(interaction: discord.Interaction):
     view = TicketView()
     await interaction.response.send_message(embed=embed, view=view)
 
-@bot.tree.command(name="setup_logs", description="Configura notificações de eventos (staff)")
+@bot.tree.command(name="setup_logs", description="Configura logs gerais (staff)")
 async def setup_logs(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.manage_channels:
         await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
         return
 
-    embed = discord.Embed(
-        title="🔔 Sistema de Notificações",
-        description="Clique nos botões abaixo para ativar notificações via DM sobre eventos do servidor.",
-        color=discord.Color.from_rgb(255, 165, 0)
-    )
-    embed.add_field(
-        name="🎫 Tickets Abertos",
-        value="Receba notificação quando um novo ticket for aberto",
-        inline=False
-    )
-    embed.add_field(
-        name="📈 Promoções",
-        value="Receba notificação sobre promoções de membros",
-        inline=False
-    )
-    embed.add_field(
-        name="⚠️ Rejeições",
-        value="Receba notificação quando promoções forem rejeitadas",
-        inline=False
-    )
-    embed.set_footer(text="Clique nos botões para ativar/desativar notificações")
-    
     server_id = str(interaction.guild.id)
-    config = db.get_config(server_id)
-    config["canal_logs"] = str(interaction.channel.id)
-    db.save_config(config)
+    db.set_log_channel(server_id, "gerais", str(interaction.channel.id))
+    log_config = db.get_log_config(server_id, "gerais")
 
-    embed.add_field(
-        name="📍 Canal de Logs",
-        value=f"Este canal foi definido como canal de logs para o servidor.",
-        inline=False
+    embed = discord.Embed(
+        title="📝 Sistema de Logs Gerais",
+        description="Logs gerais configurados neste canal.",
+        color=discord.Color.blue()
     )
-    embed.set_footer(text="Todos os eventos vão ser enviados aqui quando acontecerem.")
+    embed.add_field(name="Status", value="✅ Ativado" if log_config["enabled"] else "❌ Desativado", inline=True)
+    embed.add_field(name="Canal", value=interaction.channel.mention, inline=True)
+    embed.set_footer(text="Logs de promoções, configurações e ações administrativas")
 
-    view = LogsView(str(interaction.guild.id))
+    view = LogsGeralView(str(interaction.guild.id))
     await interaction.response.send_message(embed=embed, view=view)
 
+    # Log da configuração
     log_embed = discord.Embed(
-        title="📌 Canal de Logs Configurado",
-        description=f"Este canal foi definido como canal de logs por {interaction.user.mention}.",
-        color=discord.Color.gold()
+        title="📌 Canal de Logs Gerais Configurado",
+        description=f"Este canal foi definido como canal de logs gerais por {interaction.user.mention}.",
+        color=discord.Color.blue()
     )
-    await send_log_embed(interaction.guild, log_embed)
+    await send_log(interaction.guild, "geral", embed=log_embed)
 
-@bot.tree.command(name="setup_logs_evento", description="Configura notificações de eventos (staff)")
+@bot.tree.command(name="setup_logs_evento", description="Configura logs de eventos (staff)")
 async def setup_logs_evento(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.manage_channels:
         await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
         return
 
-    embed = discord.Embed(
-        title="🏆 Sistema de Notificações de Eventos",
-        description="Clique no botão abaixo para ativar notificações via DM sobre eventos do servidor.",
-        color=discord.Color.from_rgb(255, 165, 0)
-    )
-    embed.add_field(
-        name="🏆 Eventos",
-        value="Receba notificação quando eventos forem criados ou resultados publicados",
-        inline=False
-    )
-    embed.set_footer(text="Clique no botão para ativar/desativar notificações DM")
-    
     server_id = str(interaction.guild.id)
-    config = db.get_config(server_id)
-    config["canal_logs_treino"] = str(interaction.channel.id)
-    db.save_config(config)
+    db.set_log_channel(server_id, "eventos", str(interaction.channel.id))
+    log_config = db.get_log_config(server_id, "eventos")
 
-    embed.add_field(
-        name="📍 Canal de Logs de Eventos",
-        value=f"Este canal foi definido como canal de logs para eventos.",
-        inline=False
+    embed = discord.Embed(
+        title="🏆 Sistema de Logs de Eventos",
+        description="Logs de eventos configurados neste canal.",
+        color=discord.Color.red()
     )
-    embed.set_footer(text="Todos os logs de eventos vão ser enviados aqui quando acontecerem.")
+    embed.add_field(name="Status", value="✅ Ativado" if log_config["enabled"] else "❌ Desativado", inline=True)
+    embed.add_field(name="Canal", value=interaction.channel.mention, inline=True)
+    embed.set_footer(text="Logs de criação, edição, cancelamento e resultados de eventos")
 
     view = LogsEventoView(str(interaction.guild.id))
     await interaction.response.send_message(embed=embed, view=view)
 
+    # Log da configuração
     log_embed = discord.Embed(
         title="📌 Canal de Logs de Eventos Configurado",
         description=f"Este canal foi definido como canal de logs de eventos por {interaction.user.mention}.",
-        color=discord.Color.gold()
+        color=discord.Color.red()
     )
-    await send_log_embed(interaction.guild, log_embed)
+    await send_log(interaction.guild, "evento", embed=log_embed)
+
+@bot.tree.command(name="setup_logs_ticket", description="Configura logs de tickets (staff)")
+async def setup_logs_ticket(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.manage_channels:
+        await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+        return
+
+    server_id = str(interaction.guild.id)
+    db.set_log_channel(server_id, "tickets", str(interaction.channel.id))
+    log_config = db.get_log_config(server_id, "tickets")
+
+    embed = discord.Embed(
+        title="🎫 Sistema de Logs de Tickets",
+        description="Logs de tickets configurados neste canal.",
+        color=discord.Color.purple()
+    )
+    embed.add_field(name="Status", value="✅ Ativado" if log_config["enabled"] else "❌ Desativado", inline=True)
+    embed.add_field(name="Canal", value=interaction.channel.mention, inline=True)
+    embed.set_footer(text="Logs de abertura e fechamento de tickets")
+
+    view = LogsTicketView(str(interaction.guild.id))
+    await interaction.response.send_message(embed=embed, view=view)
+
+    # Log da configuração
+    log_embed = discord.Embed(
+        title="📌 Canal de Logs de Tickets Configurado",
+        description=f"Este canal foi definido como canal de logs de tickets por {interaction.user.mention}.",
+        color=discord.Color.purple()
+    )
+    await send_log(interaction.guild, "geral", embed=log_embed)
+
+@bot.tree.command(name="setup_dm", description="Configura notificações por DM (staff)")
+async def setup_dm(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.manage_channels:
+        await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+        return
+
+    server_id = str(interaction.guild.id)
+    dm_config = db.get_dm_config(server_id)
+
+    embed = discord.Embed(
+        title="💬 Notificações por DM",
+        description="Configure quais notificações serão enviadas por DM para staff.",
+        color=discord.Color.green()
+    )
+    embed.add_field(
+        name="👑 Promoções",
+        value=f"{'✅ Ativado' if dm_config['promocoes'] else '❌ Desativado'} - Notifica quando usuários são promovidos",
+        inline=False
+    )
+    embed.add_field(
+        name="🏆 Eventos",
+        value=f"{'✅ Ativado' if dm_config['eventos'] else '❌ Desativado'} - Notifica sobre criação e resultados de eventos",
+        inline=False
+    )
+    embed.add_field(
+        name="🎫 Tickets",
+        value=f"{'✅ Ativado' if dm_config['tickets'] else '❌ Desativado'} - Notifica sobre abertura de tickets",
+        inline=False
+    )
+    embed.set_footer(text="Clique nos botões para alternar configurações")
+
+    view = DMConfigView(str(interaction.guild.id))
+    await interaction.response.send_message(embed=embed, view=view)
 
 @bot.tree.command(name="close", description="Fecha o ticket atual (staff)")
 async def close(interaction: discord.Interaction):
@@ -1330,8 +1611,10 @@ class NovoTreinoModal(discord.ui.Modal, title="Novo Evento"):
     titulo_evento = discord.ui.TextInput(label="Título do evento", style=discord.TextStyle.short, required=True, max_length=100)
     description = discord.ui.TextInput(label="Descrição do evento", style=discord.TextStyle.paragraph, required=True, max_length=1024)
     points = discord.ui.TextInput(label="Pontos por confirmação", style=discord.TextStyle.short, required=True, default="2")
-    role = discord.ui.TextInput(label="Cargo para ping (mention, nome ou ID)", style=discord.TextStyle.short, required=False, placeholder="@Cargo, nome do cargo ou ID do cargo")
+    role = discord.ui.TextInput(label="Cargos para ping (mention, nome ou ID)", style=discord.TextStyle.short, required=False, placeholder="@Cargo1 @Cargo2, nomes ou IDs separados por vírgula")
+    users = discord.ui.TextInput(label="Usuários específicos (opcional)", style=discord.TextStyle.paragraph, required=False, placeholder="@user1 @user2, ou IDs separados por vírgula")
     channel = discord.ui.TextInput(label="Canal de publicação (mention, nome ou ID)", style=discord.TextStyle.short, required=False, placeholder="#canal, nome ou ID do canal")
+    date_time = discord.ui.TextInput(label="Data e hora (opcional)", style=discord.TextStyle.short, required=False, placeholder="DD/MM/YYYY HH:MM ou deixe em branco")
 
     def __init__(self, interaction: discord.Interaction):
         super().__init__()
@@ -1361,23 +1644,53 @@ class NovoTreinoModal(discord.ui.Modal, title="Novo Evento"):
         if not publish_channel:
             publish_channel = interaction.channel
 
-        target_role = parse_role_from_input(interaction.guild, self.role.value)
-        if not target_role and config.get("cargo_ping_treinos"):
+        # Parse múltiplos roles
+        target_roles = []
+        if self.role.value:
+            role_parts = [part.strip() for part in self.role.value.split(',')]
+            for part in role_parts:
+                role = parse_role_from_input(interaction.guild, part)
+                if role:
+                    target_roles.append(role)
+        if not target_roles and config.get("cargo_ping_treinos"):
             try:
-                target_role = interaction.guild.get_role(int(config.get("cargo_ping_treinos")))
+                default_role = interaction.guild.get_role(int(config.get("cargo_ping_treinos")))
+                if default_role:
+                    target_roles.append(default_role)
             except Exception:
-                target_role = None
+                pass
 
-        target_role_id = str(target_role.id) if target_role else ""
+        # Parse usuários específicos
+        target_users = parse_user_ids_from_text(self.users.value)
+
+        # Parse data/hora
+        horario_inicio = ""
+        if self.date_time.value:
+            try:
+                # Tentar parse DD/MM/YYYY HH:MM
+                dt = datetime.strptime(self.date_time.value.strip(), "%d/%m/%Y %H:%M")
+                horario_inicio = dt.strftime("%d/%m/%Y %H:%M")
+            except ValueError:
+                try:
+                    # Tentar parse DD/MM HH:MM (ano atual)
+                    dt = datetime.strptime(f"{datetime.now().year}/{self.date_time.value.strip()}", "%Y/%d/%m %H:%M")
+                    horario_inicio = dt.strftime("%d/%m/%Y %H:%M")
+                except ValueError:
+                    await interaction.response.send_message("❌ Formato de data/hora inválido. Use DD/MM/YYYY HH:MM ou DD/MM HH:MM.", ephemeral=True)
+                    return
+
+        target_roles_str = ','.join(str(r.id) for r in target_roles)
+        target_users_str = ','.join(target_users)
         treino_id = db.create_treino(
             server_id,
             str(interaction.user.id),
             self.titulo_evento.value,
             self.description.value,
-            "",
+            horario_inicio,
             str(publish_channel.id),
             points,
-            target_role_id
+            target_roles_str,
+            target_users_str
         )
 
         embed = discord.Embed(
@@ -1389,14 +1702,43 @@ class NovoTreinoModal(discord.ui.Modal, title="Novo Evento"):
         embed.add_field(name="ID do Evento", value=str(treino_id), inline=True)
         embed.add_field(name="Pontos por confirmação", value=str(points), inline=True)
         embed.add_field(name="Canal", value=publish_channel.mention, inline=True)
-        embed.add_field(name="Alvo", value=target_role.mention if target_role else "Todos", inline=True)
+        
+        # Alvos
+        alvo_text = ""
+        if target_roles:
+            alvo_text += "Cargos: " + " ".join(r.mention for r in target_roles)
+        if target_users:
+            user_mentions = []
+            for uid in target_users:
+                if uid.isdigit():
+                    user_mentions.append(f"<@{uid}>")
+            if user_mentions:
+                if alvo_text:
+                    alvo_text += "\n"
+                alvo_text += "Usuários: " + " ".join(user_mentions)
+        if not alvo_text:
+            alvo_text = "Todos"
+        embed.add_field(name="Alvo", value=alvo_text, inline=False)
+        
+        if horario_inicio:
+            embed.add_field(name="Data/Hora", value=horario_inicio, inline=True)
+        
         embed.add_field(name="Confirmados", value="0", inline=True)
         embed.add_field(name="Talvez", value="0", inline=True)
         embed.add_field(name="Não vou", value="0", inline=True)
         embed.set_footer(text=f"Criado por {interaction.user.display_name}")
 
+        # Criar menção para ping
+        ping_content = ""
+        if target_roles:
+            ping_content += " ".join(r.mention for r in target_roles)
+        if target_users:
+            if ping_content:
+                ping_content += " "
+            ping_content += " ".join(f"<@{uid}>" for uid in target_users if uid.isdigit())
+        
         view = TreinoConfirmView(treino_id, server_id)
-        message_obj = await publish_channel.send(content=target_role.mention if target_role else None, embed=embed, view=view, allowed_mentions=discord.AllowedMentions(roles=True))
+        message_obj = await publish_channel.send(content=ping_content if ping_content else None, embed=embed, view=view, allowed_mentions=discord.AllowedMentions(roles=True, users=True))
         db.update_treino_mensagem(treino_id, str(message_obj.id))
 
         await interaction.response.send_message(f"✅ Evento criado em {publish_channel.mention}.", ephemeral=True)
@@ -1478,8 +1820,33 @@ class ResultadoTreinoModal(discord.ui.Modal, title="Resultado do Evento"):
         log_embed.add_field(name="Não vão", value=str(count_nao), inline=True)
         log_embed.add_field(name="Participantes confirmados", value=str(awarded_count), inline=True)
         log_embed.add_field(name="Pontos por participante", value=str(points), inline=True)
+        
+        # Adicionar listas de usuários se houver
+        if respostas:
+            vou_users = [r for r in respostas if r["resposta"] == "vou"]
+            talvez_users = [r for r in respostas if r["resposta"] == "talvez"]
+            nao_users = [r for r in respostas if r["resposta"] == "nao"]
+            
+            if vou_users:
+                user_mentions = []
+                for r in vou_users[:10]:  # Limitar a 10 para não sobrecarregar
+                    member = interaction.guild.get_member(int(r["discord_id"])) if r["discord_id"].isdigit() else None
+                    user_mentions.append(member.mention if member else f"<@{r['discord_id']}>")
+                if len(vou_users) > 10:
+                    user_mentions.append(f"...e mais {len(vou_users) - 10}")
+                log_embed.add_field(name="Confirmados", value=" ".join(user_mentions), inline=False)
+            
+            if talvez_users:
+                user_mentions = []
+                for r in talvez_users[:5]:
+                    member = interaction.guild.get_member(int(r["discord_id"])) if r["discord_id"].isdigit() else None
+                    user_mentions.append(member.mention if member else f"<@{r['discord_id']}>")
+                if len(talvez_users) > 5:
+                    user_mentions.append(f"...e mais {len(talvez_users) - 5}")
+                log_embed.add_field(name="Talvez", value=" ".join(user_mentions), inline=False)
+        
         log_embed.set_footer(text=f"Registrado por {interaction.user.display_name}")
-        await send_treino_log_embed(interaction.guild, log_embed)
+        await send_log(interaction.guild, "evento", embed=log_embed)
 
         treino_channel = None
         if treino.get("canal_id"):
@@ -1498,6 +1865,19 @@ class ResultadoTreinoModal(discord.ui.Modal, title="Resultado do Evento"):
             result_embed.add_field(name="Não vão", value=str(count_nao), inline=True)
             result_embed.add_field(name="Participantes que compareceram", value=str(awarded_count), inline=True)
             result_embed.add_field(name="Pontos por participante", value=str(points), inline=True)
+            
+            # Adicionar listas de usuários se houver
+            if respostas:
+                vou_users = [r for r in respostas if r["resposta"] == "vou"]
+                if vou_users:
+                    user_mentions = []
+                    for r in vou_users[:15]:  # Mais usuários no canal público
+                        member = interaction.guild.get_member(int(r["discord_id"])) if r["discord_id"].isdigit() else None
+                        user_mentions.append(member.mention if member else f"<@{r['discord_id']}>")
+                    if len(vou_users) > 15:
+                        user_mentions.append(f"...e mais {len(vou_users) - 15}")
+                    result_embed.add_field(name="Lista de confirmados", value=" ".join(user_mentions), inline=False)
+            
             result_embed.set_footer(text=f"Registrado por {interaction.user.display_name}")
             await treino_channel.send(embed=result_embed)
 
