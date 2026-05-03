@@ -259,48 +259,62 @@ class LogsEventoView(discord.ui.View):
         super().__init__(timeout=None)
         self.guild_id = guild_id
 
-    @discord.ui.button(label="🏆 Ativar Logs Eventos", style=discord.ButtonStyle.green)
-    async def toggle_logs_eventos(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def refresh_message(self, interaction: discord.Interaction):
+        config = db.get_config(self.guild_id)
+        embed = discord.Embed(
+            title="🏆 Sistema de Logs de Eventos",
+            description="Logs de eventos configurados neste canal.",
+            color=discord.Color.red()
+        )
+        embed.add_field(name="Canal", value=interaction.channel.mention if interaction.channel else "Canal não encontrado", inline=True)
+        embed.add_field(name="Logs de eventos", value="✅ Ligado" if config.get("logs_eventos_enabled", 1) else "❌ Desligado", inline=True)
+        embed.add_field(name="Logs de respostas", value="✅ Ligado" if config.get("logs_eventos_respostas_enabled", 1) else "❌ Desligado", inline=True)
+        embed.set_footer(text="Logs de criação, edição, cancelamento e resultados de eventos")
+        await interaction.message.edit(embed=embed, view=LogsEventoView(self.guild_id))
+
+    @discord.ui.button(label="Ativar logs de eventos", style=discord.ButtonStyle.success)
+    async def enable_logs_eventos(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not interaction.user.guild_permissions.manage_channels:
             await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
             return
-        
-        server_id = str(interaction.guild.id)
-        config = db.get_config(server_id)
-        new_status = not config.get("logs_eventos_enabled", 1)
-        db.set_log_enabled(server_id, "eventos", new_status)
-        
-        # Atualizar embed
-        embed = interaction.message.embeds[0]
-        embed.set_field_at(1, name="Logs de eventos", value="✅ Ligado" if new_status else "❌ Desligado", inline=True)
-        await interaction.response.edit_message(embed=embed)
-        await interaction.followup.send("Configuração atualizada.", ephemeral=True)
 
-    @discord.ui.button(label="🚫 Desativar Logs Eventos", style=discord.ButtonStyle.red)
-    async def desativar_logs_eventos(self, interaction: discord.Interaction, button: discord.ui.Button):
-        pass
+        await interaction.response.defer(ephemeral=True)
+        db.set_log_enabled(self.guild_id, "evento", True)
+        await self.refresh_message(interaction)
+        await interaction.followup.send("Logs de eventos ativados.", ephemeral=True)
 
-    @discord.ui.button(label="💬 Ativar Logs Respostas", style=discord.ButtonStyle.green)
-    async def toggle_logs_respostas(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(label="Desativar logs de eventos", style=discord.ButtonStyle.danger)
+    async def disable_logs_eventos(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not interaction.user.guild_permissions.manage_channels:
             await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
             return
-        
-        server_id = str(interaction.guild.id)
-        config = db.get_config(server_id)
-        new_status = not config.get("logs_eventos_respostas_enabled", 1)
-        config["logs_eventos_respostas_enabled"] = new_status
-        db.save_config(config)
-        
-        # Atualizar embed
-        embed = interaction.message.embeds[0]
-        embed.set_field_at(2, name="Logs de respostas", value="✅ Ligado" if new_status else "❌ Desligado", inline=True)
-        await interaction.response.edit_message(embed=embed)
-        await interaction.followup.send("Configuração atualizada.", ephemeral=True)
 
-    @discord.ui.button(label="🚫 Desativar Logs Respostas", style=discord.ButtonStyle.red)
-    async def desativar_logs_respostas(self, interaction: discord.Interaction, button: discord.ui.Button):
-        pass
+        await interaction.response.defer(ephemeral=True)
+        db.set_log_enabled(self.guild_id, "evento", False)
+        await self.refresh_message(interaction)
+        await interaction.followup.send("Logs de eventos desativados.", ephemeral=True)
+
+    @discord.ui.button(label="Ativar logs de respostas", style=discord.ButtonStyle.success)
+    async def enable_logs_respostas(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.manage_channels:
+            await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        db.set_log_enabled(self.guild_id, "evento_resposta", True)
+        await self.refresh_message(interaction)
+        await interaction.followup.send("Logs de respostas ativados.", ephemeral=True)
+
+    @discord.ui.button(label="Desativar logs de respostas", style=discord.ButtonStyle.danger)
+    async def disable_logs_respostas(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.manage_channels:
+            await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        db.set_log_enabled(self.guild_id, "evento_resposta", False)
+        await self.refresh_message(interaction)
+        await interaction.followup.send("Logs de respostas desativados.", ephemeral=True)
 
 class LogsGeralView(discord.ui.View):
     def __init__(self, guild_id: str):
