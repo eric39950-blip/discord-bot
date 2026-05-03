@@ -23,3 +23,8 @@ if not all([DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_REDIRECT_URI, DISC
 # Caminhos
 BASE_DIR = Path(__file__).parent
 DB_PATH = BASE_DIR / DATABASE_PATH
+
+# Criar diretório do banco se necessário
+db_dir = DB_PATH.parent
+if str(db_dir) and not db_dir.exists():
+    os.makedirs(db_dir, exist_ok=True)
