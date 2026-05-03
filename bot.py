@@ -377,7 +377,7 @@ class LogsGeralView(discord.ui.View):
         server_id = str(interaction.guild.id)
         config = db.get_config(server_id)
         new_status = not config.get("logs_gerais_enabled", 1)
-        db.set_log_enabled(server_id, "gerais", new_status)
+        db.set_log_enabled(server_id, "geral", new_status)
         
         # Atualizar embed
         embed = interaction.message.embeds[0]
@@ -682,7 +682,7 @@ class TicketView(discord.ui.View):
             color=discord.Color.orange()
         )
         log_embed.add_field(name="Canal", value=f"[Ir para o ticket]({channel.jump_url})", inline=False)
-        await send_log(guild, "ticket", embed=log_embed)
+        await send_log(guild, "geral", embed=log_embed)
         
         await interaction.response.send_message("✅ Ticket criado! Verifique o canal criado.", ephemeral=True)
 
@@ -1388,9 +1388,8 @@ async def help(interaction: discord.Interaction):
     
     embed.add_field(
         name="📌 Configuração",
-        value="`/setup_logs` - Logs gerais (promoções, configs)\n"
+        value="`/setup_logs` - Logs gerais (tickets, promoções, configs, XP, ações admin)\n"
               "`/setup_logs_evento` - Logs de eventos/treinos\n"
-              "`/setup_logs_ticket` - Logs de tickets\n"
               "`/setup_dm` - Configurar notificações DM\n"
               "`/setup_xp` - Configurar XP por mensagem, registro e cooldown\n"
               "`/setup_patentes` - Gerenciar patentes do servidor\n"
@@ -1605,7 +1604,7 @@ async def setup_logs(interaction: discord.Interaction):
         return
 
     server_id = str(interaction.guild.id)
-    db.set_log_channel(server_id, "gerais", str(interaction.channel.id))
+    db.set_log_channel(server_id, "geral", str(interaction.channel.id))
     config = db.get_config(server_id)
 
     embed = discord.Embed(
@@ -1848,35 +1847,14 @@ async def setup_patentes(interaction: discord.Interaction):
     view = SetupPatentesView()
     await interaction.response.send_message(embed=embed, view=view)
 
-@bot.tree.command(name="setup_logs_ticket", description="Configura logs de tickets (staff)")
+@bot.tree.command(name="setup_logs_ticket", description="[DEPRECATED] Use /setup_logs para logs de tickets")
 async def setup_logs_ticket(interaction: discord.Interaction):
-    if not interaction.user.guild_permissions.manage_channels:
-        await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
-        return
-
-    server_id = str(interaction.guild.id)
-    db.set_log_channel(server_id, "tickets", str(interaction.channel.id))
-    config = db.get_config(server_id)
-
-    embed = discord.Embed(
-        title="🎫 Sistema de Logs de Tickets",
-        description="Logs de tickets configurados neste canal.",
-        color=discord.Color.purple()
+    await interaction.response.send_message(
+        "⚠️ **Este comando foi descontinuado.**\n"
+        "Use `/setup_logs` para configurar logs gerais (que agora incluem tickets).\n"
+        "Os logs de tickets agora usam o canal de logs gerais.",
+        ephemeral=True
     )
-    embed.add_field(name="Canal", value=interaction.channel.mention, inline=True)
-    embed.add_field(name="Logs de tickets", value="✅ Ligado" if config.get("logs_tickets_enabled", 1) else "❌ Desligado", inline=True)
-    embed.set_footer(text="Logs de abertura e fechamento de tickets")
-
-    view = LogsTicketView(str(interaction.guild.id))
-    await interaction.response.send_message(embed=embed, view=view)
-
-    # Log da configuração
-    log_embed = discord.Embed(
-        title="📌 Canal de Logs de Tickets Configurado",
-        description=f"Este canal foi definido como canal de logs de tickets por {interaction.user.mention}.",
-        color=discord.Color.purple()
-    )
-    await send_log(interaction.guild, "geral", embed=log_embed)
 
 @bot.tree.command(name="setup_dm", description="Configura notificações por DM (staff)")
 async def setup_dm(interaction: discord.Interaction):
