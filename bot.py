@@ -16,6 +16,7 @@ intents.messages = True
 intents.message_content = True
 
 bot = commands.Bot(command_prefix=None, intents=intents, help_command=None)
+BOT_COLOR = discord.Color.red()
 
 ROLE_CONFIG_KEYS = ["cargo_recruta", "cargo_soldado", "cargo_cabo", "cargo_sargento"]
 ROLE_SUFFIXES = ["recruta", "soldado", "cabo", "sargento"]
@@ -669,8 +670,63 @@ class EventoConfirmView(discord.ui.View):
         except Exception:
             pass
 
+    async def update_respostas_log(self, interaction: discord.Interaction):
+        config = db.get_config(self.server_id)
+        if not config.get("logs_eventos_enabled", 1) or not config.get("logs_eventos_respostas_enabled", 1):
+            return
+
+        treino = db.get_treino(self.treino_id)
+        respostas = db.get_treino_respostas(self.treino_id)
+
+        vou_users = [r for r in respostas if r["resposta"] == "vou"]
+        talvez_users = [r for r in respostas if r["resposta"] == "talvez"]
+        nao_users = [r for r in respostas if r["resposta"] == "nao"]
+
+        embed = discord.Embed(
+            title="📋 Respostas do Evento",
+            color=discord.Color.red()
+        )
+        embed.add_field(name="Evento", value=treino.get("titulo", treino.get("descricao", "Sem título")), inline=False)
+        embed.add_field(name="ID do Evento", value=str(self.treino_id), inline=True)
+        embed.add_field(name="Data/Hora", value=treino.get("horario_inicio", "Não definido"), inline=True)
+        embed.add_field(name="Canal", value=f"<#{treino.get('canal_id')}>" if treino.get('canal_id') else "Não definido", inline=True)
+
+        vou_list = "\n".join([f"<@{r['discord_id']}>" for r in vou_users]) if vou_users else "Nenhum"
+        embed.add_field(name="✅ Vão", value=vou_list, inline=False)
+
+        talvez_list = "\n".join([f"<@{r['discord_id']}>" for r in talvez_users]) if talvez_users else "Nenhum"
+        embed.add_field(name="❔ Talvez", value=talvez_list, inline=False)
+
+        nao_list = "\n".join([f"<@{r['discord_id']}>" for r in nao_users]) if nao_users else "Nenhum"
+        embed.add_field(name="❌ Não vão", value=nao_list, inline=False)
+
+        embed.set_footer(text=f"Última atualização: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+
+        # Enviar ou editar mensagem de log
+        log_message_id = treino.get("logs_respostas_message_id")
+        log_channel_id = config.get("logs_eventos_channel_id")
+        if not log_channel_id:
+            return
+
+        log_channel = interaction.guild.get_channel(int(log_channel_id)) if log_channel_id else None
+        if log_message_id and log_channel:
+            try:
+                message = await log_channel.fetch_message(int(log_message_id))
+                await message.edit(embed=embed)
+                return
+            except Exception:
+                pass
+
+        if log_channel:
+            message = await log_channel.send(embed=embed)
+            db.update_treino_logs_respostas_message_id(self.treino_id, str(message.id))
+
     @discord.ui.button(label="✅ Vou", style=discord.ButtonStyle.success)
     async def confirm_vou(self, interaction: discord.Interaction, button: discord.ui.Button):
+        treino = db.get_treino(self.treino_id)
+        if treino.get("status") == "finalizado":
+            await interaction.response.send_message("Este evento já foi finalizado e não aceita novas respostas.", ephemeral=True)
+            return
         discord_id = str(interaction.user.id)
         existing = db.get_treino_resposta(self.treino_id, discord_id)
         if existing and existing.get("resposta") == "vou":
@@ -681,25 +737,16 @@ class EventoConfirmView(discord.ui.View):
         db.create_or_update_user(self.server_id, discord_id, str(interaction.user))
         db.update_last_activity(self.server_id, discord_id)
         await self.refresh_embed(interaction.message)
+        await self.update_respostas_log(interaction)
         
-        # Log de resposta se habilitado
-        config = db.get_config(self.server_id)
-        if config.get("logs_eventos_respostas_enabled", 1):
-            treino = db.get_treino(self.treino_id)
-            log_embed = discord.Embed(
-                title="Resposta de Evento",
-                description=f"{interaction.user.mention} respondeu **Vou** ao evento",
-                color=discord.Color.green()
-            )
-            log_embed.add_field(name="Evento", value=treino.get("titulo", treino.get("descricao", "Sem título")), inline=False)
-            log_embed.add_field(name="ID do Evento", value=str(self.treino_id), inline=True)
-            log_embed.set_footer(text=f"Resposta registrada")
-            await send_log(interaction.guild, "evento", embed=log_embed)
-        
-        await interaction.response.send_message("✅ Resposta registrada: Vou! Seus pontos serão concedidos apenas no resultado do evento.", ephemeral=True)
+        await interaction.response.send_message("✅ Resposta registrada: Vou! Seu XP será concedido apenas no resultado do evento.", ephemeral=True)
 
     @discord.ui.button(label="🤔 Talvez", style=discord.ButtonStyle.secondary)
     async def confirm_talvez(self, interaction: discord.Interaction, button: discord.ui.Button):
+        treino = db.get_treino(self.treino_id)
+        if treino.get("status") == "finalizado":
+            await interaction.response.send_message("Este evento já foi finalizado e não aceita novas respostas.", ephemeral=True)
+            return
         discord_id = str(interaction.user.id)
         existing = db.get_treino_resposta(self.treino_id, discord_id)
         if existing and existing.get("resposta") == "talvez":
@@ -710,25 +757,16 @@ class EventoConfirmView(discord.ui.View):
         db.create_or_update_user(self.server_id, discord_id, str(interaction.user))
         db.update_last_activity(self.server_id, discord_id)
         await self.refresh_embed(interaction.message)
+        await self.update_respostas_log(interaction)
         
-        # Log de resposta se habilitado
-        config = db.get_config(self.server_id)
-        if config.get("logs_eventos_respostas_enabled", 1):
-            treino = db.get_treino(self.treino_id)
-            log_embed = discord.Embed(
-                title="Resposta de Evento",
-                description=f"{interaction.user.mention} respondeu **Talvez** ao evento",
-                color=discord.Color.yellow()
-            )
-            log_embed.add_field(name="Evento", value=treino.get("titulo", treino.get("descricao", "Sem título")), inline=False)
-            log_embed.add_field(name="ID do Evento", value=str(self.treino_id), inline=True)
-            log_embed.set_footer(text=f"Resposta registrada")
-            await send_log(interaction.guild, "evento", embed=log_embed)
-        
-        await interaction.response.send_message("🤔 Resposta registrada: Talvez! Seus pontos serão concedidos apenas no resultado do evento.", ephemeral=True)
+        await interaction.response.send_message("🤔 Resposta registrada: Talvez! Seu XP será concedido apenas no resultado do evento.", ephemeral=True)
 
     @discord.ui.button(label="❌ Não vou", style=discord.ButtonStyle.danger)
     async def confirm_nao(self, interaction: discord.Interaction, button: discord.ui.Button):
+        treino = db.get_treino(self.treino_id)
+        if treino.get("status") == "finalizado":
+            await interaction.response.send_message("Este evento já foi finalizado e não aceita novas respostas.", ephemeral=True)
+            return
         discord_id = str(interaction.user.id)
         existing = db.get_treino_resposta(self.treino_id, discord_id)
         if existing and existing.get("resposta") == "nao":
@@ -739,22 +777,9 @@ class EventoConfirmView(discord.ui.View):
         db.create_or_update_user(self.server_id, discord_id, str(interaction.user))
         db.update_last_activity(self.server_id, discord_id)
         await self.refresh_embed(interaction.message)
+        await self.update_respostas_log(interaction)
         
-        # Log de resposta se habilitado
-        config = db.get_config(self.server_id)
-        if config.get("logs_eventos_respostas_enabled", 1):
-            treino = db.get_treino(self.treino_id)
-            log_embed = discord.Embed(
-                title="Resposta de Evento",
-                description=f"{interaction.user.mention} respondeu **Não vou** ao evento",
-                color=discord.Color.red()
-            )
-            log_embed.add_field(name="Evento", value=treino.get("titulo", treino.get("descricao", "Sem título")), inline=False)
-            log_embed.add_field(name="ID do Evento", value=str(self.treino_id), inline=True)
-            log_embed.set_footer(text=f"Resposta registrada")
-            await send_log(interaction.guild, "evento", embed=log_embed)
-        
-        await interaction.response.send_message("❌ Resposta registrada: Não vou! Seus pontos serão concedidos apenas no resultado do evento.", ephemeral=True)
+        await interaction.response.send_message("❌ Resposta registrada: Não vou! Seu XP será concedido apenas no resultado do evento.", ephemeral=True)
 
 @bot.event
 async def on_ready():
@@ -1191,69 +1216,57 @@ async def check_promotion(guild: discord.Guild, member: discord.Member, config: 
     server_id = str(guild.id)
     user = db.get_user(server_id, str(member.id))
     if not user:
-        return
+        return None
 
     xp = user["xp"]
-    auto_promover = config.get("auto_promover", 1) == 1
+    auto_promover_global = config.get("auto_promover", 1) == 1
     usar_dm = config.get("usar_dm", 1) == 1
 
-    # Get patentes ordered by XP required
     patentes = db.get_patentes_ordenadas_por_xp(server_id)
     if not patentes:
-        return
+        return None
 
-    current_xp = user.get("cargo_atual", "")
+    current_cargo = user.get("cargo_atual", "").lower()
     new_patente = None
 
-    # Find the highest rank the user qualifies for
-    for patente in patentes:
-        if xp >= patente["xp_necessario"] and current_xp != patente["nome"].lower():
+    for patente in sorted(patentes, key=lambda x: x.get("xp_necessario", 0), reverse=True):
+        if xp >= patente["xp_necessario"] and current_cargo != patente["nome"].lower():
             new_patente = patente
             break
 
     if not new_patente:
-        return
+        return None
 
-    new_role_name = new_patente["nome"].lower()
-    xp_required = new_patente["xp_necessario"]
+    if new_patente.get("auto_promover", 1) == 0 or not auto_promover_global:
+        return None
 
-    if auto_promover:
-        # Promoção automática
-        role_id = new_patente.get("role_id")
-        if role_id:
-            role = guild.get_role(int(role_id))
-            if role:
-                try:
-                    await member.add_roles(role)
-                    db.update_user_role(server_id, str(member.id), new_role_name)
-                    db.add_xp(server_id, str(member.id), 0, "promocao", f"Auto-promovido para {new_role_name}")
+    role_id = new_patente.get("role_id")
+    if not role_id:
+        return None
 
-                    if usar_dm:
-                        try:
-                            await member.send(f"🎉 Parabéns! Você foi promovido para {role.name} no servidor {guild.name}!")
-                        except:
-                            pass  # Ignorar erro de DM
+    role = guild.get_role(int(role_id))
+    if not role:
+        return None
 
-                except Exception as e:
-                    print(f"Erro ao promover {member}: {e}")
-    else:
-        # Promoção manual - enviar para canal de avaliação
-        canal_id = config.get("canal_avaliacao")
-        if canal_id:
-            channel = guild.get_channel(int(canal_id))
-            if channel:
-                embed = discord.Embed(
-                    title="📈 Solicitação de Promoção",
-                    color=discord.Color.blue()
-                )
-                embed.add_field(name="👤 Usuário", value=member.mention, inline=True)
-                embed.add_field(name="🎯 Cargo Solicitado", value=new_role_name.title(), inline=True)
-                embed.add_field(name="⭐ XP Atual", value=f"{xp} XP", inline=True)
-                embed.add_field(name="📊 XP Necessário", value=f"{xp_required} XP", inline=True)
-                embed.set_footer(text="Staff, use os botões abaixo para aprovar ou rejeitar.")
+    try:
+        await member.add_roles(role)
+        db.update_user_role(server_id, str(member.id), new_patente["nome"].lower())
+        db.add_xp(server_id, str(member.id), 0, "promocao", f"Auto-promovido para {new_patente['nome']}")
 
-                view = PromotionView(server_id, str(member.id), new_role_name, xp_required)
-                await channel.send(embed=embed, view=view)
+        if usar_dm:
+            try:
+                await member.send(f"🎉 Parabéns! Você foi promovido para {role.name} no servidor {guild.name}!")
+            except:
+                pass
+
+        return {
+            "type": "auto",
+            "role_name": role.name,
+            "patente": new_patente["nome"]
+        }
+    except Exception as e:
+        print(f"Erro ao promover {member}: {e}")
+        return None
 
 @bot.tree.command(name="xp", description="Mostra seu XP atual")
 async def xp(interaction: discord.Interaction):
@@ -1312,8 +1325,9 @@ async def help(interaction: discord.Interaction):
               "`/setup_logs_evento` - Logs de eventos/treinos\n"
               "`/setup_logs_ticket` - Logs de tickets\n"
               "`/setup_dm` - Configurar notificações DM\n"
+              "`/setup_patentes` - Gerenciar patentes do servidor\n"
               "`/set_verified_role` - Cargo verificado para tickets\n"
-              "`/set_ping_treinos` - Cargo para ping de eventos",
+              "`/set_canal_evento` - Define o canal de eventos",
         inline=False
     )
     
@@ -1332,7 +1346,7 @@ async def help(interaction: discord.Interaction):
     embed.add_field(
         name="🏆 Eventos",
         value="`/novo_evento` - Criar evento via modal\n"
-              "`/resultadoevento` - Registrar resultado e distribuir pontos",
+              "`/resultadoevento` - Registrar resultado e distribuir XP",
         inline=False
     )
     
@@ -1371,9 +1385,10 @@ async def hierarchy(interaction: discord.Interaction):
     
     for patente in patentes:
         role_mention = f"<@&{patente['role_id']}>" if patente['role_id'] else "Cargo não configurado"
+        promocao_text = "Automática" if patente.get("auto_promover", 1) == 1 else "Manual"
         embed.add_field(
             name=f"{patente['nome']}",
-            value=f"⭐ {patente['xp_necessario']} XP — {role_mention}",
+            value=f"⭐ {patente['xp_necessario']} XP — {role_mention} — {promocao_text}",
             inline=False
         )
     
@@ -1578,6 +1593,193 @@ async def setup_logs_evento(interaction: discord.Interaction):
     )
     await send_log(interaction.guild, "evento", embed=log_embed)
 
+def build_patentes_embed(guild: discord.Guild) -> discord.Embed:
+    server_id = str(guild.id)
+    patentes = db.get_patentes(server_id)
+    embed = discord.Embed(
+        title="⚔️ Patentes do Servidor",
+        description="Lista de patentes atuais e seus cargos.",
+        color=BOT_COLOR
+    )
+
+    if not patentes:
+        embed.add_field(name="Patentes", value="Nenhuma patente configurada.", inline=False)
+        return embed
+
+    descricao = []
+    for patente in patentes:
+        role_text = f"<@&{patente['role_id']}>" if patente.get('role_id') else "Cargo não configurado"
+        promocao = "Automática" if patente.get('auto_promover', 1) == 1 else "Manual"
+        descricao.append(
+            f"ID {patente['id']} — {patente['nome']}\n"
+            f"Cargo: {role_text}\n"
+            f"XP necessário: {patente['xp_necessario']}\n"
+            f"Promoção: {promocao}"
+        )
+
+    embed.add_field(name="Patentes", value="\n\n".join(descricao), inline=False)
+    return embed
+
+class SetupPatentesView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="➕ Adicionar patente", style=discord.ButtonStyle.success)
+    async def add_patente(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(AddPatenteModal(interaction))
+
+    @discord.ui.button(label="✏️ Editar patente", style=discord.ButtonStyle.primary)
+    async def edit_patente(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(EditPatenteModal(interaction))
+
+    @discord.ui.button(label="🗑️ Remover patente", style=discord.ButtonStyle.danger)
+    async def remove_patente(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(RemovePatenteModal(interaction))
+
+    @discord.ui.button(label="🔄 Atualizar lista", style=discord.ButtonStyle.secondary)
+    async def refresh_list(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = build_patentes_embed(interaction.guild)
+        await interaction.response.edit_message(embed=embed, view=self)
+
+class AddPatenteModal(discord.ui.Modal, title="Adicionar Patente"):
+    nome = discord.ui.TextInput(label="Nome", style=discord.TextStyle.short, required=True, max_length=100)
+    cargo = discord.ui.TextInput(label="Cargo (mention/ID/nome)", style=discord.TextStyle.short, required=False, max_length=100)
+    xp = discord.ui.TextInput(label="XP necessário", style=discord.TextStyle.short, required=True, default="0")
+    promocao = discord.ui.TextInput(label="Promoção (auto/manual)", style=discord.TextStyle.short, required=True, default="auto")
+    ordem = discord.ui.TextInput(label="Ordem", style=discord.TextStyle.short, required=True, default="0")
+
+    def __init__(self, interaction: discord.Interaction):
+        super().__init__()
+        self.interaction = interaction
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not interaction.user.guild_permissions.manage_roles:
+            await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+            return
+
+        server_id = str(interaction.guild.id)
+        role = None
+        if self.cargo.value:
+            role = parse_role_from_input(interaction.guild, self.cargo.value)
+
+        if role:
+            role_id = str(role.id)
+        else:
+            role_result = DiscordAPI.ensure_discord_role(server_id, self.cargo.value.strip() if self.cargo.value else self.nome.value.strip())
+            if "error" in role_result:
+                await interaction.response.send_message(f"❌ Não foi possível criar ou encontrar o cargo: {role_result.get('message')}", ephemeral=True)
+                return
+            role_id = str(role_result.get("id"))
+
+        try:
+            xp_value = int(self.xp.value.strip())
+            ordem_value = int(self.ordem.value.strip())
+        except ValueError:
+            await interaction.response.send_message("❌ XP e ordem devem ser números inteiros.", ephemeral=True)
+            return
+
+        auto_promover = 1 if self.promocao.value.strip().lower() == "auto" else 0
+        db.create_patente(server_id, self.nome.value.strip(), role_id, xp_value, ordem_value, 1, auto_promover)
+        await interaction.response.send_message("✅ Patente adicionada com sucesso.", ephemeral=True)
+
+class EditPatenteModal(discord.ui.Modal, title="Editar Patente"):
+    patente_id = discord.ui.TextInput(label="ID da patente", style=discord.TextStyle.short, required=True)
+    nome = discord.ui.TextInput(label="Nome (opcional)", style=discord.TextStyle.short, required=False, max_length=100)
+    cargo = discord.ui.TextInput(label="Cargo (opcional)", style=discord.TextStyle.short, required=False, max_length=100)
+    xp = discord.ui.TextInput(label="XP necessário (opcional)", style=discord.TextStyle.short, required=False, default="")
+    promocao = discord.ui.TextInput(label="Promoção (auto/manual) (opcional)", style=discord.TextStyle.short, required=False, default="")
+
+    def __init__(self, interaction: discord.Interaction):
+        super().__init__()
+        self.interaction = interaction
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not interaction.user.guild_permissions.manage_roles:
+            await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+            return
+
+        server_id = str(interaction.guild.id)
+        if not self.patente_id.value.strip().isdigit():
+            await interaction.response.send_message("❌ ID inválido.", ephemeral=True)
+            return
+
+        patente_id = int(self.patente_id.value.strip())
+        patente = db.get_patente_by_id(server_id, patente_id)
+        if not patente:
+            await interaction.response.send_message("❌ Patente não encontrada.", ephemeral=True)
+            return
+
+        data = {}
+        if self.nome.value.strip():
+            data["nome"] = self.nome.value.strip()
+        if self.cargo.value.strip():
+            role = parse_role_from_input(interaction.guild, self.cargo.value)
+            if role:
+                data["role_id"] = str(role.id)
+            else:
+                role_result = DiscordAPI.ensure_discord_role(server_id, self.cargo.value.strip())
+                if "error" in role_result:
+                    await interaction.response.send_message(f"❌ Não foi possível criar ou encontrar o cargo: {role_result.get('message')}", ephemeral=True)
+                    return
+                data["role_id"] = str(role_result.get("id"))
+        if self.xp.value.strip():
+            try:
+                data["xp_necessario"] = int(self.xp.value.strip())
+            except ValueError:
+                await interaction.response.send_message("❌ XP precisa ser um número inteiro.", ephemeral=True)
+                return
+        if self.promocao.value.strip():
+            data["auto_promover"] = 1 if self.promocao.value.strip().lower() == "auto" else 0
+
+        if not data:
+            await interaction.response.send_message("❌ Nenhum campo para atualizar.", ephemeral=True)
+            return
+
+        success = db.update_patente(patente_id, server_id, data)
+        if not success:
+            await interaction.response.send_message("❌ Falha ao atualizar a patente.", ephemeral=True)
+            return
+
+        await interaction.response.send_message("✅ Patente atualizada com sucesso.", ephemeral=True)
+
+class RemovePatenteModal(discord.ui.Modal, title="Remover Patente"):
+    patente_id = discord.ui.TextInput(label="ID da patente", style=discord.TextStyle.short, required=True)
+
+    def __init__(self, interaction: discord.Interaction):
+        super().__init__()
+        self.interaction = interaction
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not interaction.user.guild_permissions.manage_roles:
+            await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+            return
+
+        server_id = str(interaction.guild.id)
+        if not self.patente_id.value.strip().isdigit():
+            await interaction.response.send_message("❌ ID inválido.", ephemeral=True)
+            return
+
+        patente_id = int(self.patente_id.value.strip())
+        result = db.delete_patente(patente_id, server_id)
+        if result is None:
+            await interaction.response.send_message("❌ Patente não encontrada.", ephemeral=True)
+            return
+        if not result:
+            await interaction.response.send_message("❌ Esta patente não pode ser removida.", ephemeral=True)
+            return
+
+        await interaction.response.send_message("✅ Patente removida com sucesso.", ephemeral=True)
+
+@bot.tree.command(name="setup_patentes", description="Configura as patentes do servidor (staff)")
+async def setup_patentes(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.manage_roles:
+        await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+        return
+
+    embed = build_patentes_embed(interaction.guild)
+    view = SetupPatentesView()
+    await interaction.response.send_message(embed=embed, view=view)
+
 @bot.tree.command(name="setup_logs_ticket", description="Configura logs de tickets (staff)")
 async def setup_logs_ticket(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.manage_channels:
@@ -1705,7 +1907,7 @@ class NovoEventoModal(discord.ui.Modal, title="Novo Evento"):
     titulo = discord.ui.TextInput(label="Título do evento", style=discord.TextStyle.short, required=True, max_length=100)
     descricao = discord.ui.TextInput(label="Descrição do evento", style=discord.TextStyle.paragraph, required=True, max_length=1024)
     data_hora = discord.ui.TextInput(label="Data e hora (opcional)", style=discord.TextStyle.short, required=False, placeholder="DD/MM/YYYY HH:MM ou deixe em branco")
-    pontos = discord.ui.TextInput(label="Pontos por confirmação", style=discord.TextStyle.short, required=True, default="2")
+    pontos = discord.ui.TextInput(label="XP por confirmação", style=discord.TextStyle.short, required=True, default="2")
     alvos = discord.ui.TextInput(label="Alvos (cargos e usuários)", style=discord.TextStyle.paragraph, required=False, placeholder="@cargo1 @user1, nomes ou IDs separados por vírgula")
 
     def __init__(self, interaction: discord.Interaction):
@@ -1721,11 +1923,11 @@ class NovoEventoModal(discord.ui.Modal, title="Novo Evento"):
         config = db.get_config(server_id)
 
         try:
-            points = int(self.pontos.value.strip())
-            if points < 0:
+            xp_amount = int(self.pontos.value.strip())
+            if xp_amount < 0:
                 raise ValueError
         except ValueError:
-            await interaction.response.send_message("❌ O valor de pontos precisa ser um número inteiro zero ou positivo.", ephemeral=True)
+            await interaction.response.send_message("❌ O valor de XP precisa ser um número inteiro zero ou positivo.", ephemeral=True)
             return
 
         publish_channel = None
@@ -1780,7 +1982,7 @@ class NovoEventoModal(discord.ui.Modal, title="Novo Evento"):
             self.descricao.value,
             horario_inicio,
             str(publish_channel.id),
-            points,
+            xp_amount,
             target_roles_str,
             target_users_str
         )
@@ -1792,7 +1994,7 @@ class NovoEventoModal(discord.ui.Modal, title="Novo Evento"):
         )
         embed.add_field(name="Título", value=self.titulo.value, inline=False)
         embed.add_field(name="ID do Evento", value=str(treino_id), inline=True)
-        embed.add_field(name="Pontos por confirmação", value=str(points), inline=True)
+        embed.add_field(name="XP por confirmação", value=str(xp_amount), inline=True)
         embed.add_field(name="Canal", value=publish_channel.mention, inline=True)
         
         # Alvos
@@ -1835,7 +2037,7 @@ class NovoEventoModal(discord.ui.Modal, title="Novo Evento"):
 
         await interaction.response.send_message(f"✅ Evento criado em {publish_channel.mention}.", ephemeral=True)
 
-@bot.tree.command(name="novo_evento", description="Cria um novo evento com título, pontos e alvo (staff)")
+@bot.tree.command(name="novo_evento", description="Cria um novo evento com título, XP e alvo (staff)")
 async def novo_evento(interaction: discord.Interaction):
     await interaction.response.send_modal(NovoEventoModal(interaction))
 
@@ -1843,7 +2045,7 @@ class ResultadoEventoModal(discord.ui.Modal, title="Resultado do Evento"):
     treino_id = discord.ui.TextInput(label="ID do treino", style=discord.TextStyle.short, required=True)
     resultado = discord.ui.TextInput(label="Resumo do resultado", style=discord.TextStyle.paragraph, required=True)
     participantes = discord.ui.TextInput(label="Membros que participaram (opcional)", style=discord.TextStyle.paragraph, required=False, placeholder="Deixe em branco para usar quem marcou 'vou'. Ou mencione @usuários.")
-    pontos = discord.ui.TextInput(label="Pontos por participante", style=discord.TextStyle.short, required=True, default="2")
+    xp = discord.ui.TextInput(label="XP por participante", style=discord.TextStyle.short, required=True, default="2")
 
     def __init__(self, interaction: discord.Interaction):
         super().__init__()
@@ -1863,11 +2065,11 @@ class ResultadoEventoModal(discord.ui.Modal, title="Resultado do Evento"):
             return
 
         try:
-            points = int(self.pontos.value.strip())
-            if points < 0:
+            xp_amount = int(self.xp.value.strip())
+            if xp_amount < 0:
                 raise ValueError
         except ValueError:
-            await interaction.response.send_message("❌ O valor de pontos precisa ser um número inteiro zero ou positivo.", ephemeral=True)
+            await interaction.response.send_message("❌ O valor de XP precisa ser um número inteiro zero ou positivo.", ephemeral=True)
             return
 
         respostas = db.get_treino_respostas(treino_id)
@@ -1880,7 +2082,10 @@ class ResultadoEventoModal(discord.ui.Modal, title="Resultado do Evento"):
         count_nao = sum(1 for r in respostas if r["resposta"] == "nao")
 
         awarded_count = 0
-        awarded_list = []
+        awarded_details = []
+        promotions = []
+        config = db.get_config(server_id)
+
         for discord_id in actual_ids:
             username = discord_id
             member = interaction.guild.get_member(int(discord_id)) if discord_id.isdigit() else None
@@ -1888,55 +2093,102 @@ class ResultadoEventoModal(discord.ui.Modal, title="Resultado do Evento"):
                 username = str(member)
             try:
                 db.create_or_update_user(server_id, discord_id, username)
-                db.add_xp(server_id, discord_id, points, "evento", f"Evento confirmado: {treino['descricao'][:64]}")
+                db.add_xp(server_id, discord_id, xp_amount, "evento", f"Evento confirmado: {treino['descricao'][:64]}")
                 awarded_count += 1
-                awarded_list.append(discord_id)
+                mention = member.mention if member else f"<@{discord_id}>"
+                awarded_details.append(f"{mention} — {xp_amount} XP")
+                if member:
+                    promotion_info = await check_promotion(interaction.guild, member, config)
+                    if promotion_info:
+                        promotions.append(f"{mention} -> {promotion_info['role_name']}")
             except Exception:
                 pass
 
         for resposta in respostas:
             participou = resposta["discord_id"] in actual_ids
-            db.mark_treino_participacao(treino_id, resposta["discord_id"], participou, points if participou else 0)
+            db.mark_treino_participacao(treino_id, resposta["discord_id"], participou, xp_amount if participou else 0)
 
         db.finalize_treino(treino_id)
+
+        # Editar mensagem original do evento para finalizar e remover botões
+        if treino.get("canal_id") and treino.get("mensagem_id"):
+            try:
+                channel = interaction.guild.get_channel(int(treino["canal_id"]))
+                if channel:
+                    event_message = await channel.fetch_message(int(treino["mensagem_id"]))
+                    final_embed = discord.Embed(
+                        title="🏆 Evento Finalizado",
+                        description=treino.get("descricao", ""),
+                        color=BOT_COLOR
+                    )
+                    final_embed.add_field(name="ID do Evento", value=str(treino_id), inline=True)
+                    final_embed.add_field(name="Vão", value=str(count_vou), inline=True)
+                    final_embed.add_field(name="Talvez", value=str(count_talvez), inline=True)
+                    final_embed.add_field(name="Não vão", value=str(count_nao), inline=True)
+                    final_embed.add_field(name="Confirmados", value=str(awarded_count), inline=True)
+                    final_embed.add_field(name="XP por participante", value=str(xp_amount), inline=True)
+                    final_embed.set_footer(text="Evento finalizado")
+                    await event_message.edit(embed=final_embed, view=None)
+            except Exception:
+                pass
 
         log_embed = discord.Embed(
             title="Resultado de Evento Registrado",
             description=self.resultado.value,
-            color=discord.Color.green()
+            color=BOT_COLOR
         )
         log_embed.add_field(name="Evento", value=treino.get("titulo", treino.get("descricao", "Sem título")), inline=False)
         log_embed.add_field(name="ID do Evento", value=str(treino_id), inline=True)
         log_embed.add_field(name="Vão", value=str(count_vou), inline=True)
         log_embed.add_field(name="Talvez", value=str(count_talvez), inline=True)
         log_embed.add_field(name="Não vão", value=str(count_nao), inline=True)
-        log_embed.add_field(name="Participantes confirmados", value=str(awarded_count), inline=True)
-        log_embed.add_field(name="Pontos por participante", value=str(points), inline=True)
-        
-        # Adicionar listas de usuários se houver
+        log_embed.add_field(name="Confirmados", value=str(awarded_count), inline=True)
+        log_embed.add_field(name="XP por participante", value=str(xp_amount), inline=True)
+
+        if awarded_details:
+            details_text = "\n".join(awarded_details[:10])
+            if len(awarded_details) > 10:
+                details_text += f"\n...e mais {len(awarded_details) - 10}"
+            log_embed.add_field(name="XP distribuído", value=details_text, inline=False)
+
+        if promotions:
+            promotions_text = "\n".join(promotions[:10])
+            if len(promotions) > 10:
+                promotions_text += f"\n...e mais {len(promotions) - 10}"
+            log_embed.add_field(name="Promoções geradas", value=promotions_text, inline=False)
+
         if respostas:
             vou_users = [r for r in respostas if r["resposta"] == "vou"]
             talvez_users = [r for r in respostas if r["resposta"] == "talvez"]
             nao_users = [r for r in respostas if r["resposta"] == "nao"]
-            
+
             if vou_users:
                 user_mentions = []
-                for r in vou_users[:10]:  # Limitar a 10 para não sobrecarregar
+                for r in vou_users[:10]:
                     member = interaction.guild.get_member(int(r["discord_id"])) if r["discord_id"].isdigit() else None
                     user_mentions.append(member.mention if member else f"<@{r['discord_id']}>")
                 if len(vou_users) > 10:
                     user_mentions.append(f"...e mais {len(vou_users) - 10}")
-                log_embed.add_field(name="Confirmados", value=" ".join(user_mentions), inline=False)
-            
+                log_embed.add_field(name="✅ Vão", value="\n".join(user_mentions), inline=False)
+
             if talvez_users:
                 user_mentions = []
-                for r in talvez_users[:5]:
+                for r in talvez_users[:10]:
                     member = interaction.guild.get_member(int(r["discord_id"])) if r["discord_id"].isdigit() else None
                     user_mentions.append(member.mention if member else f"<@{r['discord_id']}>")
-                if len(talvez_users) > 5:
-                    user_mentions.append(f"...e mais {len(talvez_users) - 5}")
-                log_embed.add_field(name="Talvez", value=" ".join(user_mentions), inline=False)
-        
+                if len(talvez_users) > 10:
+                    user_mentions.append(f"...e mais {len(talvez_users) - 10}")
+                log_embed.add_field(name="❔ Talvez", value="\n".join(user_mentions), inline=False)
+
+            if nao_users:
+                user_mentions = []
+                for r in nao_users[:10]:
+                    member = interaction.guild.get_member(int(r["discord_id"])) if r["discord_id"].isdigit() else None
+                    user_mentions.append(member.mention if member else f"<@{r['discord_id']}>")
+                if len(nao_users) > 10:
+                    user_mentions.append(f"...e mais {len(nao_users) - 10}")
+                log_embed.add_field(name="❌ Não vão", value="\n".join(user_mentions), inline=False)
+
         log_embed.set_footer(text=f"Registrado por {interaction.user.display_name}")
         await send_log(interaction.guild, "evento", embed=log_embed)
 
@@ -1946,36 +2198,33 @@ class ResultadoEventoModal(discord.ui.Modal, title="Resultado do Evento"):
 
         if treino_channel:
             result_embed = discord.Embed(
-                title="Resultado do Evento",
+                title="🏆 Evento Finalizado",
                 description=treino.get("descricao", ""),
-                color=discord.Color.green()
+                color=BOT_COLOR
             )
             result_embed.add_field(name="Resultado", value=self.resultado.value, inline=False)
             result_embed.add_field(name="ID do Evento", value=str(treino_id), inline=True)
             result_embed.add_field(name="Vão", value=str(count_vou), inline=True)
             result_embed.add_field(name="Talvez", value=str(count_talvez), inline=True)
             result_embed.add_field(name="Não vão", value=str(count_nao), inline=True)
-            result_embed.add_field(name="Participantes que compareceram", value=str(awarded_count), inline=True)
-            result_embed.add_field(name="Pontos por participante", value=str(points), inline=True)
-            
-            # Adicionar listas de usuários se houver
-            if respostas:
-                vou_users = [r for r in respostas if r["resposta"] == "vou"]
-                if vou_users:
-                    user_mentions = []
-                    for r in vou_users[:15]:  # Mais usuários no canal público
-                        member = interaction.guild.get_member(int(r["discord_id"])) if r["discord_id"].isdigit() else None
-                        user_mentions.append(member.mention if member else f"<@{r['discord_id']}>")
-                    if len(vou_users) > 15:
-                        user_mentions.append(f"...e mais {len(vou_users) - 15}")
-                    result_embed.add_field(name="Lista de confirmados", value=" ".join(user_mentions), inline=False)
-            
+            result_embed.add_field(name="Confirmados", value=str(awarded_count), inline=True)
+            result_embed.add_field(name="XP por participante", value=str(xp_amount), inline=True)
+            if awarded_details:
+                details_text = "\n".join(awarded_details[:15])
+                if len(awarded_details) > 15:
+                    details_text += f"\n...e mais {len(awarded_details) - 15}"
+                result_embed.add_field(name="XP distribuído", value=details_text, inline=False)
+            if promotions:
+                promotions_text = "\n".join(promotions[:10])
+                if len(promotions) > 10:
+                    promotions_text += f"\n...e mais {len(promotions) - 10}"
+                result_embed.add_field(name="Promoções geradas", value=promotions_text, inline=False)
             result_embed.set_footer(text=f"Registrado por {interaction.user.display_name}")
             await treino_channel.send(embed=result_embed)
 
-        await interaction.response.send_message(f"✅ Resultado registrado. {awarded_count} participantes receberam {points} pontos.", ephemeral=True)
+        await interaction.response.send_message(f"✅ Resultado registrado. {awarded_count} participantes receberam {xp_amount} XP.", ephemeral=True)
 
-@bot.tree.command(name="resultadoevento", description="Registra resultado de um evento e distribui pontos")
+@bot.tree.command(name="resultadoevento", description="Registra resultado de um evento e distribui XP")
 async def resultadoevento(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.manage_roles:
         await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
@@ -1996,8 +2245,8 @@ async def set_inactivity_channel(interaction: discord.Interaction, channel: disc
 
     await interaction.response.send_message(f"✅ Canal de inatividade definido como {channel.mention}.", ephemeral=True)
 
-@bot.tree.command(name="set_message_points", description="Define quantos pontos por mensagem no chat (staff)")
-@app_commands.describe(amount="Quantidade de pontos por mensagem")
+@bot.tree.command(name="set_message_points", description="Define quantos XP por mensagem no chat (staff)")
+@app_commands.describe(amount="Quantidade de XP por mensagem")
 async def set_message_points(interaction: discord.Interaction, amount: int):
     if not interaction.user.guild_permissions.manage_roles:
         await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
@@ -2012,7 +2261,7 @@ async def set_message_points(interaction: discord.Interaction, amount: int):
     config["pontos_por_msg"] = amount
     db.save_config(config)
 
-    await interaction.response.send_message(f"✅ Pontos por mensagem definidos para {amount}.", ephemeral=True)
+    await interaction.response.send_message(f"✅ XP por mensagem definidos para {amount}.", ephemeral=True)
 
 @bot.tree.command(name="last_active", description="Mostra quando um usuário falou por último")
 @app_commands.describe(user="Usuário para verificar")
