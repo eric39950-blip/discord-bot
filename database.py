@@ -1085,7 +1085,7 @@ class Database:
     def set_log_channel(self, server_id: str, log_type: str, channel_id: str) -> bool:
         """Define o canal para um tipo de log específico."""
         self.ensure_config(server_id)
-        mapping = {
+        channel_mapping = {
             "geral": "logs_gerais_channel_id",
             "xp": "logs_xp_channel_id",
             "staff": "logs_staff_channel_id",
@@ -1096,7 +1096,7 @@ class Database:
             "evento_resposta": "logs_eventos_channel_id",
             "resposta_evento": "logs_eventos_channel_id",
         }
-        column = mapping.get(log_type)
+        column = channel_mapping.get(log_type)
         if not column:
             raise ValueError(f"Invalid log_type: {log_type}")
 
@@ -1112,7 +1112,7 @@ class Database:
     def set_log_enabled(self, server_id: str, log_type: str, enabled: bool) -> bool:
         """Ativa/desativa logs para um tipo específico."""
         self.ensure_config(server_id)
-        mapping = {
+        enabled_mapping = {
             "geral": "logs_gerais_enabled",
             "xp": "logs_xp_enabled",
             "staff": "logs_staff_enabled",
@@ -1123,7 +1123,7 @@ class Database:
             "evento_resposta": "logs_eventos_respostas_enabled",
             "resposta_evento": "logs_eventos_respostas_enabled",
         }
-        column = mapping.get(log_type)
+        column = enabled_mapping.get(log_type)
         if not column:
             raise ValueError(f"Invalid log_type: {log_type}")
 
@@ -1139,15 +1139,32 @@ class Database:
     def get_log_config(self, server_id: str, log_type: str) -> Dict[str, Any]:
         """Retorna configuração de log para um tipo específico."""
         config = self.get_config(server_id)
-        if log_type in ("evento", "eventos"):
-            channel_key = "logs_eventos_channel_id"
-            enabled_key = "logs_eventos_enabled"
-        elif log_type == "evento_resposta":
-            channel_key = "logs_eventos_channel_id"
-            enabled_key = "logs_eventos_respostas_enabled"
-        else:
-            channel_key = f"logs_{log_type}_channel_id"
-            enabled_key = f"logs_{log_type}_enabled"
+        channel_mapping = {
+            "geral": "logs_gerais_channel_id",
+            "xp": "logs_xp_channel_id",
+            "staff": "logs_staff_channel_id",
+            "ticket": "logs_tickets_channel_id",
+            "tickets": "logs_tickets_channel_id",
+            "evento": "logs_eventos_channel_id",
+            "eventos": "logs_eventos_channel_id",
+            "evento_resposta": "logs_eventos_channel_id",
+            "resposta_evento": "logs_eventos_channel_id",
+        }
+        enabled_mapping = {
+            "geral": "logs_gerais_enabled",
+            "xp": "logs_xp_enabled",
+            "staff": "logs_staff_enabled",
+            "ticket": "logs_tickets_enabled",
+            "tickets": "logs_tickets_enabled",
+            "evento": "logs_eventos_enabled",
+            "eventos": "logs_eventos_enabled",
+            "evento_resposta": "logs_eventos_respostas_enabled",
+            "resposta_evento": "logs_eventos_respostas_enabled",
+        }
+        channel_key = channel_mapping.get(log_type)
+        enabled_key = enabled_mapping.get(log_type)
+        if not channel_key or not enabled_key:
+            raise ValueError(f"Invalid log_type: {log_type}")
 
         return {
             "channel_id": config.get(channel_key),
