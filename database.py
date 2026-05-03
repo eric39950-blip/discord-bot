@@ -47,7 +47,23 @@ class Database:
                     precisa_aprovacao INTEGER DEFAULT 1,
                     sistema_ativo INTEGER DEFAULT 1,
                     usar_dm INTEGER DEFAULT 1,
-                    usar_ia INTEGER DEFAULT 0
+                    usar_ia INTEGER DEFAULT 0,
+                    -- Novos campos de logs
+                    logs_gerais_channel_id TEXT,
+                    logs_gerais_enabled INTEGER DEFAULT 1,
+                    logs_eventos_channel_id TEXT,
+                    logs_eventos_enabled INTEGER DEFAULT 1,
+                    logs_tickets_channel_id TEXT,
+                    logs_tickets_enabled INTEGER DEFAULT 1,
+                    logs_xp_channel_id TEXT,
+                    logs_xp_enabled INTEGER DEFAULT 1,
+                    -- Novos campos de DM
+                    dm_promocoes_enabled INTEGER DEFAULT 1,
+                    dm_eventos_enabled INTEGER DEFAULT 0,
+                    dm_tickets_enabled INTEGER DEFAULT 0,
+                    dm_staff_enabled INTEGER DEFAULT 0,
+                    -- Config de logs de respostas
+                    logs_eventos_respostas_enabled INTEGER DEFAULT 1
                 )
             """)
 
@@ -175,7 +191,8 @@ class Database:
                     canal_id TEXT,
                     mensagem_id TEXT,
                     pontos INTEGER DEFAULT 2,
-                    target_role_id TEXT,
+                    target_roles TEXT,
+                    target_users TEXT,
                     status TEXT DEFAULT 'aberto',
                     lembrete_enviado INTEGER DEFAULT 0,
                     criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -282,7 +299,20 @@ class Database:
                 "precisa_aprovacao": 1,
                 "sistema_ativo": 1,
                 "usar_dm": 1,
-                "usar_ia": 0
+                "usar_ia": 0,
+                "logs_gerais_channel_id": None,
+                "logs_gerais_enabled": 1,
+                "logs_eventos_channel_id": None,
+                "logs_eventos_enabled": 1,
+                "logs_tickets_channel_id": None,
+                "logs_tickets_enabled": 1,
+                "logs_xp_channel_id": None,
+                "logs_xp_enabled": 1,
+                "dm_promocoes_enabled": 1,
+                "dm_eventos_enabled": 0,
+                "dm_tickets_enabled": 0,
+                "dm_staff_enabled": 0,
+                "logs_eventos_respostas_enabled": 1
             }
 
     def _backup_config(self, config: Dict[str, Any]):
@@ -308,8 +338,13 @@ class Database:
                         lembrete_treino_minutos, dm_treinos,
                         xp_soldado, xp_cabo, xp_sargento, pontos_por_msg,
                         pontos_por_registro, cooldown_msg, auto_promover,
-                        precisa_aprovacao, sistema_ativo, usar_dm, usar_ia
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        precisa_aprovacao, sistema_ativo, usar_dm, usar_ia,
+                        logs_gerais_channel_id, logs_gerais_enabled, logs_eventos_channel_id,
+                        logs_eventos_enabled, logs_tickets_channel_id, logs_tickets_enabled,
+                        logs_xp_channel_id, logs_xp_enabled,
+                        dm_promocoes_enabled, dm_eventos_enabled, dm_tickets_enabled, dm_staff_enabled,
+                        logs_eventos_respostas_enabled
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     config["server_id"], config.get("canal_avaliacao"), config.get("canal_registro"),
                     config.get("canal_logs"), config.get("cargo_recruta"), config.get("cargo_soldado"),
@@ -321,7 +356,14 @@ class Database:
                     config.get("pontos_por_msg", 10), config.get("pontos_por_registro", 50),
                     config.get("cooldown_msg", 60), config.get("auto_promover", 1),
                     config.get("precisa_aprovacao", 1), config.get("sistema_ativo", 1), config.get("usar_dm", 1),
-                    config.get("usar_ia", 0)
+                    config.get("usar_ia", 0),
+                    config.get("logs_gerais_channel_id"), config.get("logs_gerais_enabled", 1),
+                    config.get("logs_eventos_channel_id"), config.get("logs_eventos_enabled", 1),
+                    config.get("logs_tickets_channel_id"), config.get("logs_tickets_enabled", 1),
+                    config.get("logs_xp_channel_id"), config.get("logs_xp_enabled", 1),
+                    config.get("dm_promocoes_enabled", 1), config.get("dm_eventos_enabled", 0),
+                    config.get("dm_tickets_enabled", 0), config.get("dm_staff_enabled", 0),
+                    config.get("logs_eventos_respostas_enabled", 1)
                 ))
                 conn.commit()
                 # Fazer backup da config
@@ -559,13 +601,13 @@ class Database:
             """, (server_id,))
             return [row[0] for row in cursor.fetchall()]
 
-    def create_treino(self, server_id: str, criado_por: str, titulo: str = "Treino", descricao: str = "", horario_inicio: str = "", canal_id: str = "", pontos: int = 2, target_role_id: str = "") -> int:
+    def create_treino(self, server_id: str, criado_por: str, titulo: str = "Treino", descricao: str = "", horario_inicio: str = "", canal_id: str = "", pontos: int = 2, target_roles: str = "", target_users: str = "") -> int:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO treinos (server_id, criado_por, titulo, descricao, horario_inicio, canal_id, pontos, target_role_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (server_id, criado_por, titulo, descricao, horario_inicio, canal_id, pontos, target_role_id))
+                INSERT INTO treinos (server_id, criado_por, titulo, descricao, horario_inicio, canal_id, pontos, target_roles, target_users)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (server_id, criado_por, titulo, descricao, horario_inicio, canal_id, pontos, target_roles, target_users))
             conn.commit()
             return cursor.lastrowid
 
@@ -944,6 +986,46 @@ class Database:
                     "error": f"Erro ao inserir patentes no banco: {str(e)}",
                     "roles_created": roles_created
                 }
+
+    # Métodos para gerenciamento de logs e DM
+    def set_log_channel(self, server_id: str, log_type: str, channel_id: str) -> bool:
+        """Define o canal para um tipo de log específico."""
+        field_name = f"logs_{log_type}_channel_id"
+        config = self.get_config(server_id)
+        config[field_name] = channel_id
+        return self.save_config(config)
+
+    def set_log_enabled(self, server_id: str, log_type: str, enabled: bool) -> bool:
+        """Ativa/desativa logs para um tipo específico."""
+        field_name = f"logs_{log_type}_enabled"
+        config = self.get_config(server_id)
+        config[field_name] = 1 if enabled else 0
+        return self.save_config(config)
+
+    def get_log_config(self, server_id: str, log_type: str) -> Dict[str, Any]:
+        """Retorna configuração de log para um tipo específico."""
+        config = self.get_config(server_id)
+        return {
+            "channel_id": config.get(f"logs_{log_type}_channel_id"),
+            "enabled": config.get(f"logs_{log_type}_enabled", 1) == 1
+        }
+
+    def set_dm_enabled(self, server_id: str, dm_type: str, enabled: bool) -> bool:
+        """Ativa/desativa DM para um tipo específico."""
+        field_name = f"dm_{dm_type}_enabled"
+        config = self.get_config(server_id)
+        config[field_name] = 1 if enabled else 0
+        return self.save_config(config)
+
+    def get_dm_config(self, server_id: str) -> Dict[str, Any]:
+        """Retorna configuração de DM."""
+        config = self.get_config(server_id)
+        return {
+            "promocoes": config.get("dm_promocoes_enabled", 1) == 1,
+            "eventos": config.get("dm_eventos_enabled", 0) == 1,
+            "tickets": config.get("dm_tickets_enabled", 0) == 1,
+            "staff": config.get("dm_staff_enabled", 0) == 1
+        }
 
 # Instância global
 db = Database()
