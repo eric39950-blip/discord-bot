@@ -70,6 +70,52 @@ class Database:
                 )
             """)
 
+            # Garantir colunas de logs em bancos antigos
+            try:
+                cursor.execute("ALTER TABLE configuracoes ADD COLUMN logs_gerais_channel_id TEXT")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("ALTER TABLE configuracoes ADD COLUMN logs_gerais_enabled INTEGER DEFAULT 1")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("ALTER TABLE configuracoes ADD COLUMN logs_eventos_channel_id TEXT")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("ALTER TABLE configuracoes ADD COLUMN logs_eventos_enabled INTEGER DEFAULT 1")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("ALTER TABLE configuracoes ADD COLUMN logs_tickets_channel_id TEXT")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("ALTER TABLE configuracoes ADD COLUMN logs_tickets_enabled INTEGER DEFAULT 1")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("ALTER TABLE configuracoes ADD COLUMN logs_xp_channel_id TEXT")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("ALTER TABLE configuracoes ADD COLUMN logs_xp_enabled INTEGER DEFAULT 1")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("ALTER TABLE configuracoes ADD COLUMN logs_staff_channel_id TEXT")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("ALTER TABLE configuracoes ADD COLUMN logs_staff_enabled INTEGER DEFAULT 1")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("ALTER TABLE configuracoes ADD COLUMN logs_eventos_respostas_enabled INTEGER DEFAULT 1")
+            except sqlite3.OperationalError:
+                pass
+
             # Tabela de usuários
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS usuarios (
@@ -337,23 +383,23 @@ class Database:
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("""
-                    INSERT OR REPLACE INTO configuracoes (
-                        server_id, canal_avaliacao, canal_registro, canal_logs,
-                        cargo_recruta, cargo_soldado, cargo_cabo, cargo_sargento,
-                        cargo_ping_treinos, canal_treinos, canal_inatividade, canal_logs_treino,
-                        pontos_por_treino, cargo_verificado,
-                        lembrete_treino_minutos, dm_treinos,
-                        xp_soldado, xp_cabo, xp_sargento, pontos_por_msg,
-                        pontos_por_registro, cooldown_msg, auto_promover,
-                        precisa_aprovacao, sistema_ativo, usar_dm, usar_ia,
-                        logs_gerais_channel_id, logs_gerais_enabled, logs_eventos_channel_id,
-                        logs_eventos_enabled, logs_tickets_channel_id, logs_tickets_enabled,
-                        logs_xp_channel_id, logs_xp_enabled,
-                        dm_promocoes_enabled, dm_eventos_enabled, dm_tickets_enabled, dm_staff_enabled,
-                        logs_eventos_respostas_enabled
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
+                columns = [
+                    "server_id", "canal_avaliacao", "canal_registro", "canal_logs",
+                    "cargo_recruta", "cargo_soldado", "cargo_cabo", "cargo_sargento",
+                    "cargo_ping_treinos", "canal_treinos", "canal_eventos", "canal_inatividade", "canal_logs_treino",
+                    "pontos_por_treino", "cargo_verificado",
+                    "lembrete_treino_minutos", "dm_treinos",
+                    "xp_soldado", "xp_cabo", "xp_sargento", "pontos_por_msg",
+                    "pontos_por_registro", "cooldown_msg", "auto_promover",
+                    "precisa_aprovacao", "sistema_ativo", "usar_dm", "usar_ia",
+                    "logs_gerais_channel_id", "logs_gerais_enabled", "logs_eventos_channel_id",
+                    "logs_eventos_enabled", "logs_tickets_channel_id", "logs_tickets_enabled",
+                    "logs_xp_channel_id", "logs_xp_enabled", "logs_staff_channel_id", "logs_staff_enabled",
+                    "dm_promocoes_enabled", "dm_eventos_enabled", "dm_tickets_enabled", "dm_staff_enabled",
+                    "logs_eventos_respostas_enabled"
+                ]
+                placeholders = ",".join(["?"] * len(columns))
+                values = [
                     config["server_id"], config.get("canal_avaliacao"), config.get("canal_registro"),
                     config.get("canal_logs"), config.get("cargo_recruta"), config.get("cargo_soldado"),
                     config.get("cargo_cabo"), config.get("cargo_sargento"), config.get("cargo_ping_treinos"),
@@ -368,14 +414,15 @@ class Database:
                     config.get("logs_gerais_channel_id"), config.get("logs_gerais_enabled", 1),
                     config.get("logs_eventos_channel_id"), config.get("logs_eventos_enabled", 1),
                     config.get("logs_tickets_channel_id"), config.get("logs_tickets_enabled", 1),
-                    config.get("logs_xp_channel_id"), config.get("logs_xp_enabled", 1),
-                    config.get("logs_staff_channel_id"), config.get("logs_staff_enabled", 1),
-                    config.get("dm_promocoes_enabled", 1), config.get("dm_eventos_enabled", 0),
-                    config.get("dm_tickets_enabled", 0), config.get("dm_staff_enabled", 0),
+                    config.get("logs_xp_channel_id"), config.get("logs_xp_enabled", 1), config.get("logs_staff_channel_id"), config.get("logs_staff_enabled", 1),
+                    config.get("dm_promocoes_enabled", 1), config.get("dm_eventos_enabled", 0), config.get("dm_tickets_enabled", 0), config.get("dm_staff_enabled", 0),
                     config.get("logs_eventos_respostas_enabled", 1)
-                ))
+                ]
+                cursor.execute(
+                    f"INSERT OR REPLACE INTO configuracoes ({','.join(columns)}) VALUES ({placeholders})",
+                    values
+                )
                 conn.commit()
-                # Fazer backup da config
                 self._backup_config(config)
                 print(f"Config salva e backup feito para server_id: {config['server_id']}")
                 return True
@@ -1020,26 +1067,91 @@ class Database:
                 }
 
     # Métodos para gerenciamento de logs e DM
+    def ensure_config(self, server_id: str) -> bool:
+        """Garante que exista uma linha de configuração mínima para o servidor."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "INSERT OR IGNORE INTO configuracoes (server_id) VALUES (?)",
+                    (server_id,)
+                )
+                conn.commit()
+            return True
+        except Exception as e:
+            print(f"Erro ao garantir config para server_id {server_id}: {e}")
+            return False
+
     def set_log_channel(self, server_id: str, log_type: str, channel_id: str) -> bool:
         """Define o canal para um tipo de log específico."""
-        field_name = f"logs_{log_type}_channel_id"
-        config = self.get_config(server_id)
-        config[field_name] = channel_id
-        return self.save_config(config)
+        self.ensure_config(server_id)
+        mapping = {
+            "geral": "logs_gerais_channel_id",
+            "xp": "logs_xp_channel_id",
+            "staff": "logs_staff_channel_id",
+            "ticket": "logs_tickets_channel_id",
+            "tickets": "logs_tickets_channel_id",
+            "evento": "logs_eventos_channel_id",
+            "eventos": "logs_eventos_channel_id",
+            "evento_resposta": "logs_eventos_channel_id",
+            "resposta_evento": "logs_eventos_channel_id",
+        }
+        column = mapping.get(log_type)
+        if not column:
+            raise ValueError(f"Invalid log_type: {log_type}")
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"UPDATE configuracoes SET {column} = ? WHERE server_id = ?",
+                (channel_id, server_id)
+            )
+            conn.commit()
+        return True
 
     def set_log_enabled(self, server_id: str, log_type: str, enabled: bool) -> bool:
         """Ativa/desativa logs para um tipo específico."""
-        field_name = f"logs_{log_type}_enabled"
-        config = self.get_config(server_id)
-        config[field_name] = 1 if enabled else 0
-        return self.save_config(config)
+        self.ensure_config(server_id)
+        mapping = {
+            "geral": "logs_gerais_enabled",
+            "xp": "logs_xp_enabled",
+            "staff": "logs_staff_enabled",
+            "ticket": "logs_tickets_enabled",
+            "tickets": "logs_tickets_enabled",
+            "evento": "logs_eventos_enabled",
+            "eventos": "logs_eventos_enabled",
+            "evento_resposta": "logs_eventos_respostas_enabled",
+            "resposta_evento": "logs_eventos_respostas_enabled",
+        }
+        column = mapping.get(log_type)
+        if not column:
+            raise ValueError(f"Invalid log_type: {log_type}")
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"UPDATE configuracoes SET {column} = ? WHERE server_id = ?",
+                (1 if enabled else 0, server_id)
+            )
+            conn.commit()
+        return True
 
     def get_log_config(self, server_id: str, log_type: str) -> Dict[str, Any]:
         """Retorna configuração de log para um tipo específico."""
         config = self.get_config(server_id)
+        if log_type in ("evento", "eventos"):
+            channel_key = "logs_eventos_channel_id"
+            enabled_key = "logs_eventos_enabled"
+        elif log_type == "evento_resposta":
+            channel_key = "logs_eventos_channel_id"
+            enabled_key = "logs_eventos_respostas_enabled"
+        else:
+            channel_key = f"logs_{log_type}_channel_id"
+            enabled_key = f"logs_{log_type}_enabled"
+
         return {
-            "channel_id": config.get(f"logs_{log_type}_channel_id"),
-            "enabled": config.get(f"logs_{log_type}_enabled", 1) == 1
+            "channel_id": config.get(channel_key),
+            "enabled": config.get(enabled_key, 1) == 1
         }
 
     def set_dm_enabled(self, server_id: str, dm_type: str, enabled: bool) -> bool:
