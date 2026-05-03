@@ -1339,6 +1339,7 @@ async def help(interaction: discord.Interaction):
               "`/setup_logs_evento` - Logs de eventos/treinos\n"
               "`/setup_logs_ticket` - Logs de tickets\n"
               "`/setup_dm` - Configurar notificações DM\n"
+              "`/setup_xp` - Configurar XP por mensagem, registro e cooldown\n"
               "`/setup_patentes` - Gerenciar patentes do servidor\n"
               "`/set_verified_role` - Cargo verificado para tickets\n"
               "`/set_canal_evento` - Define o canal de eventos",
@@ -1847,6 +1848,133 @@ async def setup_dm(interaction: discord.Interaction):
     view = DMNotificationsView(str(interaction.guild.id))
     await interaction.response.send_message(embed=embed, view=view)
 
+class SetupXPModal(discord.ui.Modal, title="Editar Configuração de XP"):
+    xp_mensagem = discord.ui.TextInput(label="XP por mensagem", style=discord.TextStyle.short, required=False, placeholder="Ex: 10")
+    xp_registro = discord.ui.TextInput(label="XP por registro", style=discord.TextStyle.short, required=False, placeholder="Ex: 50")
+    cooldown = discord.ui.TextInput(label="Cooldown em segundos", style=discord.TextStyle.short, required=False, placeholder="Ex: 60")
+
+    def __init__(self, interaction: discord.Interaction):
+        super().__init__()
+        self.interaction = interaction
+
+    async def on_submit(self, interaction: discord.Interaction):
+        server_id = str(interaction.guild.id)
+        updates = {}
+        errors = []
+
+        if self.xp_mensagem.value.strip():
+            try:
+                val = int(self.xp_mensagem.value.strip())
+                if val < 0:
+                    raise ValueError
+                updates["pontos_por_msg"] = val
+            except ValueError:
+                errors.append("XP por mensagem deve ser um número inteiro >= 0")
+
+        if self.xp_registro.value.strip():
+            try:
+                val = int(self.xp_registro.value.strip())
+                if val < 0:
+                    raise ValueError
+                updates["pontos_por_registro"] = val
+            except ValueError:
+                errors.append("XP por registro deve ser um número inteiro >= 0")
+
+        if self.cooldown.value.strip():
+            try:
+                val = int(self.cooldown.value.strip())
+                if val < 0:
+                    raise ValueError
+                updates["cooldown_msg"] = val
+            except ValueError:
+                errors.append("Cooldown deve ser um número inteiro >= 0")
+
+        if errors:
+            await interaction.response.send_message("❌ " + "\n".join(errors), ephemeral=True)
+            return
+
+        if not updates:
+            await interaction.response.send_message("❌ Você precisa preencher pelo menos um campo.", ephemeral=True)
+            return
+
+        db.set_xp_config(server_id, **updates)
+        await interaction.response.send_message("✅ Configuração de XP atualizada.", ephemeral=True)
+
+class SetupXPView(discord.ui.View):
+    def __init__(self, server_id: str):
+        super().__init__(timeout=None)
+        self.server_id = server_id
+
+    async def refresh_embed(self, interaction: discord.Interaction):
+        config = db.get_config(self.server_id)
+        embed = discord.Embed(
+            title="⭐ Configuração de XP",
+            description="Configure o sistema de XP do servidor.",
+            color=discord.Color.red()
+        )
+        embed.add_field(name="XP por mensagem", value=str(config.get("pontos_por_msg", 10)), inline=True)
+        embed.add_field(name="XP por registro", value=str(config.get("pontos_por_registro", 50)), inline=True)
+        embed.add_field(name="Cooldown por mensagem", value=f"{config.get('cooldown_msg', 60)} segundos", inline=True)
+        embed.add_field(name="Sistema ativo", value="✅ Ligado" if config.get("sistema_ativo", 1) else "❌ Desligado", inline=True)
+        embed.set_footer(text="Clique nos botões para alterar configurações")
+        await interaction.message.edit(embed=embed, view=SetupXPView(self.server_id))
+
+    @discord.ui.button(label="Editar XP", style=discord.ButtonStyle.primary)
+    async def edit_xp(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.manage_channels:
+            await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+            return
+        await interaction.response.send_modal(SetupXPModal(interaction))
+
+    @discord.ui.button(label="Ativar sistema", style=discord.ButtonStyle.success)
+    async def enable_system(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.manage_channels:
+            await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        db.set_xp_config(self.server_id, sistema_ativo=1)
+        await self.refresh_embed(interaction)
+        await interaction.followup.send("Sistema de XP ativado.", ephemeral=True)
+
+    @discord.ui.button(label="Desativar sistema", style=discord.ButtonStyle.danger)
+    async def disable_system(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.manage_channels:
+            await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        db.set_xp_config(self.server_id, sistema_ativo=0)
+        await self.refresh_embed(interaction)
+        await interaction.followup.send("Sistema de XP desativado.", ephemeral=True)
+
+    @discord.ui.button(label="Atualizar", style=discord.ButtonStyle.secondary)
+    async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+        await self.refresh_embed(interaction)
+        await interaction.followup.send("Embed atualizado.", ephemeral=True)
+
+@bot.tree.command(name="setup_xp", description="Configura XP por mensagem, XP por registro e cooldown (staff)")
+async def setup_xp(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.manage_channels:
+        await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+        return
+
+    server_id = str(interaction.guild.id)
+    config = db.get_config(server_id)
+
+    embed = discord.Embed(
+        title="⭐ Configuração de XP",
+        description="Configure o sistema de XP do servidor.",
+        color=discord.Color.red()
+    )
+    embed.add_field(name="XP por mensagem", value=str(config.get("pontos_por_msg", 10)), inline=True)
+    embed.add_field(name="XP por registro", value=str(config.get("pontos_por_registro", 50)), inline=True)
+    embed.add_field(name="Cooldown por mensagem", value=f"{config.get('cooldown_msg', 60)} segundos", inline=True)
+    embed.add_field(name="Sistema ativo", value="✅ Ligado" if config.get("sistema_ativo", 1) else "❌ Desligado", inline=True)
+    embed.set_footer(text="Clique nos botões para alterar configurações")
+
+    view = SetupXPView(server_id)
+    await interaction.response.send_message(embed=embed, view=view)
+
 @bot.tree.command(name="close", description="Fecha o ticket atual (staff)")
 async def close(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.manage_channels:
@@ -2058,7 +2186,7 @@ async def novo_evento(interaction: discord.Interaction):
 class ResultadoEventoModal(discord.ui.Modal, title="Resultado do Evento"):
     treino_id = discord.ui.TextInput(label="ID do treino", style=discord.TextStyle.short, required=True)
     resultado = discord.ui.TextInput(label="Resumo do resultado", style=discord.TextStyle.paragraph, required=True)
-    participantes = discord.ui.TextInput(label="Membros que participaram (opcional)", style=discord.TextStyle.paragraph, required=False, placeholder="Deixe em branco para usar quem marcou 'vou'. Ou mencione @usuários.")
+    participantes = discord.ui.TextInput(label="Participantes confirmados", style=discord.TextStyle.paragraph, required=True, placeholder="Marque os participantes: @usuario1 @usuario2")
     xp = discord.ui.TextInput(label="XP por participante", style=discord.TextStyle.short, required=True, default="2")
 
     def __init__(self, interaction: discord.Interaction):
@@ -2089,7 +2217,8 @@ class ResultadoEventoModal(discord.ui.Modal, title="Resultado do Evento"):
         respostas = db.get_treino_respostas(treino_id)
         actual_ids = parse_user_ids_from_text(self.participantes.value)
         if not actual_ids:
-            actual_ids = {r["discord_id"] for r in respostas if r["resposta"] == "vou"}
+            await interaction.response.send_message("❌ Você precisa informar pelo menos um participante confirmado.", ephemeral=True)
+            return
 
         count_vou = sum(1 for r in respostas if r["resposta"] == "vou")
         count_talvez = sum(1 for r in respostas if r["resposta"] == "talvez")
@@ -2136,7 +2265,7 @@ class ResultadoEventoModal(discord.ui.Modal, title="Resultado do Evento"):
                         color=BOT_COLOR
                     )
                     final_embed.add_field(name="ID do Evento", value=str(treino_id), inline=True)
-                    final_embed.add_field(name="Vão", value=str(count_vou), inline=True)
+                    final_embed.add_field(name="Participaram", value=str(count_vou), inline=True)
                     final_embed.add_field(name="Talvez", value=str(count_talvez), inline=True)
                     final_embed.add_field(name="Não vão", value=str(count_nao), inline=True)
                     final_embed.add_field(name="Confirmados", value=str(awarded_count), inline=True)
@@ -2153,7 +2282,7 @@ class ResultadoEventoModal(discord.ui.Modal, title="Resultado do Evento"):
         )
         log_embed.add_field(name="Evento", value=treino.get("titulo", treino.get("descricao", "Sem título")), inline=False)
         log_embed.add_field(name="ID do Evento", value=str(treino_id), inline=True)
-        log_embed.add_field(name="Vão", value=str(count_vou), inline=True)
+        log_embed.add_field(name="Participaram", value=str(count_vou), inline=True)
         log_embed.add_field(name="Talvez", value=str(count_talvez), inline=True)
         log_embed.add_field(name="Não vão", value=str(count_nao), inline=True)
         log_embed.add_field(name="Confirmados", value=str(awarded_count), inline=True)
@@ -2183,7 +2312,7 @@ class ResultadoEventoModal(discord.ui.Modal, title="Resultado do Evento"):
                     user_mentions.append(member.mention if member else f"<@{r['discord_id']}>")
                 if len(vou_users) > 10:
                     user_mentions.append(f"...e mais {len(vou_users) - 10}")
-                log_embed.add_field(name="✅ Vão", value="\n".join(user_mentions), inline=False)
+                log_embed.add_field(name="✅ Participaram", value="\n".join(user_mentions), inline=False)
 
             if talvez_users:
                 user_mentions = []
@@ -2218,7 +2347,7 @@ class ResultadoEventoModal(discord.ui.Modal, title="Resultado do Evento"):
             )
             result_embed.add_field(name="Resultado", value=self.resultado.value, inline=False)
             result_embed.add_field(name="ID do Evento", value=str(treino_id), inline=True)
-            result_embed.add_field(name="Vão", value=str(count_vou), inline=True)
+            result_embed.add_field(name="Participaram", value=str(count_vou), inline=True)
             result_embed.add_field(name="Talvez", value=str(count_talvez), inline=True)
             result_embed.add_field(name="Não vão", value=str(count_nao), inline=True)
             result_embed.add_field(name="Confirmados", value=str(awarded_count), inline=True)
@@ -2360,7 +2489,7 @@ def build_activity_embeds(title: str, header: str, lines: list[str], color: disc
         embeds.append(discord.Embed(title=title, description=description, color=color))
     return embeds
 
-@bot.tree.command(name="activity_status", description="Mostra status de atividade em treinos e em chat")
+@bot.tree.command(name="activity_status", description="Mostra status de atividade em eventos e em chat")
 async def activity_status(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.manage_roles:
         await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
@@ -2373,26 +2502,15 @@ async def activity_status(interaction: discord.Interaction):
         await interaction.response.send_message("❌ Não foi possível encontrar membros no servidor.", ephemeral=True)
         return
 
-    treino_lines = []
-    treinos = db.get_treinos(server_id)
-    latest_treino = next((t for t in treinos if t.get("status") != "cancelado"), None)
-    if latest_treino:
-        treino_lines.append(f"🎯 Treino: {latest_treino.get('titulo', 'Treino')}")
-        treino_lines.append(f"🕔 Criado em: {latest_treino.get('criado_em', 'Desconhecido')}")
-        treino_lines.append("")
-        respostas = db.get_treino_respostas(latest_treino["id"])
-        if respostas:
-            for resposta in respostas[:25]:
-                member = interaction.guild.get_member(int(resposta["discord_id"]))
-                name = member.mention if member else f"<@{resposta['discord_id']}>"
-                treino_lines.append(f"{name} — {resposta['resposta'].title()}")
-        else:
-            treino_lines.append("Nenhuma resposta registrada para o último treino.")
-    else:
-        treino_lines.append("Nenhum treino registrado no servidor.")
+    embed = discord.Embed(
+        title="📊 Status de Atividade",
+        description="Relatório de atividade dos membros no servidor.",
+        color=discord.Color.blue()
+    )
 
+    # Atividade em Chat
     chat_lines = []
-    for member in members:
+    for member in members[:20]:  # Limitar para não exceder limite de embed
         user_activity = db.get_last_activity(server_id, str(member.id))
         if user_activity and user_activity > 0:
             inactivity = now_ts - user_activity
@@ -2406,25 +2524,38 @@ async def activity_status(interaction: discord.Interaction):
         else:
             chat_lines.append(f"⚪ {member.mention} — Sem registro")
 
-    chat_header = (
-        "💬 Atividade em Chat:\n"
-        "🟢 Até 2 dias — ativo.\n"
-        "🟡 Entre 2 e 3 dias — atenção.\n"
-        "🔴 3 dias ou mais — inativo.\n"
-        "⚪ Sem registro — sem atividade registrada.\n\n"
+    embed.add_field(
+        name="💬 Atividade em Chat",
+        value="🟢 Até 2 dias — ativo.\n🟡 Entre 2 e 3 dias — atenção.\n🔴 3 dias ou mais — inativo.\n⚪ Sem registro — sem atividade registrada.\n\n" + "\n".join(chat_lines[:15]),
+        inline=False
     )
 
-    treino_embeds = build_activity_embeds("📌 Atividade em Treinos", "", treino_lines, discord.Color.blue())
-    chat_embeds = build_activity_embeds("💬 Atividade em Chat", chat_header, chat_lines, discord.Color.blue())
-    embeds = treino_embeds + chat_embeds
+    # Atividade em Eventos
+    event_lines = []
+    for member in members[:20]:  # Limitar para não exceder limite de embed
+        event_activity = db.get_last_event_activity(server_id, str(member.id))
+        if event_activity:
+            resposta_ts = int(datetime.fromisoformat(event_activity["resposta_criado_em"]).timestamp())
+            inactivity = now_ts - resposta_ts
+            if inactivity <= 7 * 24 * 60 * 60:
+                status = "🟢"
+            elif inactivity <= 14 * 24 * 60 * 60:
+                status = "🟡"
+            else:
+                status = "🔴"
+            titulo = event_activity["titulo"][:20] + "..." if len(event_activity["titulo"]) > 20 else event_activity["titulo"]
+            event_lines.append(f"{status} {member.mention} — último evento: {titulo} — {format_elapsed_time(inactivity)}")
+        else:
+            event_lines.append(f"⚪ {member.mention} — Sem registro")
 
-    if not embeds:
-        await interaction.response.send_message("✅ Nenhum usuário encontrado.", ephemeral=True)
-        return
+    embed.add_field(
+        name="🏆 Atividade em Eventos",
+        value="🟢 Participou recentemente — ativo.\n🟡 Participou há alguns dias — atenção.\n🔴 Muito tempo sem participar — inativo.\n⚪ Sem registro — sem participação registrada.\n\n" + "\n".join(event_lines[:15]),
+        inline=False
+    )
 
-    await interaction.response.send_message(embed=embeds[0], ephemeral=True)
-    for embed in embeds[1:]:
-        await interaction.followup.send(embed=embed, ephemeral=True)
+    embed.set_footer(text=f"Total de membros: {len(members)} | Atualizado em {datetime.now().strftime('%H:%M')}")
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 @tasks.loop(minutes=1)
 async def lembrete_task():
