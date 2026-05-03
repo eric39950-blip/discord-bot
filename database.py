@@ -193,10 +193,11 @@ class Database:
                     horario_inicio TEXT,
                     canal_id TEXT,
                     mensagem_id TEXT,
+                    logs_respostas_message_id TEXT,
                     pontos INTEGER DEFAULT 2,
                     target_roles TEXT,
                     target_users TEXT,
-                    status TEXT DEFAULT 'aberto',
+                    status TEXT DEFAULT 'ativo',
                     lembrete_enviado INTEGER DEFAULT 0,
                     criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -242,6 +243,7 @@ class Database:
                     xp_necessario INTEGER DEFAULT 0,
                     ordem INTEGER DEFAULT 0,
                     pode_excluir INTEGER DEFAULT 1,
+                    auto_promover INTEGER DEFAULT 1,
                     criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
@@ -723,6 +725,14 @@ class Database:
             """, (mensagem_id, treino_id))
             conn.commit()
 
+    def update_treino_logs_respostas_message_id(self, treino_id: int, message_id: str):
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE treinos SET logs_respostas_message_id = ? WHERE id = ?
+            """, (message_id, treino_id))
+            conn.commit()
+
     def get_treinos_para_lembrete(self) -> List[Dict[str, Any]]:
         # Buscar treinos abertos com horário próximo e lembrete não enviado
         with self._get_connection() as conn:
@@ -849,6 +859,20 @@ class Database:
             columns = [desc[0] for desc in cursor.description]
             return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
+    def get_patente_by_id(self, server_id: str, patente_id: int) -> Optional[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM patentes
+                WHERE server_id = ? AND id = ?
+                LIMIT 1
+            """, (server_id, patente_id))
+            row = cursor.fetchone()
+            if row:
+                columns = [desc[0] for desc in cursor.description]
+                return dict(zip(columns, row))
+            return None
+
     def get_patentes_ordenadas_por_xp(self, server_id: str) -> List[Dict[str, Any]]:
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -860,18 +884,18 @@ class Database:
             columns = [desc[0] for desc in cursor.description]
             return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
-    def create_patente(self, server_id: str, nome: str, role_id: Optional[str] = None, xp_necessario: int = 0, ordem: int = 0, pode_excluir: int = 1) -> int:
+    def create_patente(self, server_id: str, nome: str, role_id: Optional[str] = None, xp_necessario: int = 0, ordem: int = 0, pode_excluir: int = 1, auto_promover: int = 1) -> int:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO patentes (server_id, nome, role_id, xp_necessario, ordem, pode_excluir)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (server_id, nome, role_id, int(xp_necessario), int(ordem), int(pode_excluir)))
+                INSERT INTO patentes (server_id, nome, role_id, xp_necessario, ordem, pode_excluir, auto_promover)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (server_id, nome, role_id, int(xp_necessario), int(ordem), int(pode_excluir), int(auto_promover)))
             conn.commit()
             return cursor.lastrowid
 
     def update_patente(self, patente_id: int, server_id: str, data: Dict[str, Any]) -> bool:
-        allowed_keys = ["nome", "role_id", "xp_necessario", "ordem", "pode_excluir"]
+        allowed_keys = ["nome", "role_id", "xp_necessario", "ordem", "pode_excluir", "auto_promover"]
         fields = []
         values = []
         for key in allowed_keys:
@@ -969,14 +993,15 @@ class Database:
                     role_id,
                     patente["xp"],
                     patente["ordem"],
-                    patente["pode_excluir"]
+                    patente["pode_excluir"],
+                    1
                 ))
 
             # Inserir todas as patentes com seus role_ids
             try:
                 cursor.executemany("""
-                    INSERT INTO patentes (server_id, nome, role_id, xp_necessario, ordem, pode_excluir)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    INSERT INTO patentes (server_id, nome, role_id, xp_necessario, ordem, pode_excluir, auto_promover)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                 """, rows_to_insert)
                 conn.commit()
                 
