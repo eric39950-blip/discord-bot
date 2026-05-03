@@ -132,6 +132,52 @@ def parse_user_ids_from_text(text: str) -> set[str]:
     ids.update(raw_ids)
     return ids
 
+
+def parse_confirmed_members(guild: discord.Guild, text: str) -> list[discord.Member]:
+    if not text.strip():
+        return []
+
+    # Primeiro, extrair IDs de menções e números
+    ids = parse_user_ids_from_text(text)
+    members = []
+
+    # Adicionar membros por ID
+    for id_str in ids:
+        member = guild.get_member(int(id_str))
+        if member:
+            members.append(member)
+
+    # Separar texto por vírgula, espaço, quebra de linha, ponto e vírgula
+    separators = re.split(r'[,\s\n;]+', text)
+    for part in separators:
+        part = part.strip()
+        if not part:
+            continue
+
+        # Pular se já foi processado como ID
+        if re.match(r'^\d{17,19}$', part):
+            continue
+
+        # Tentar buscar por nome/display_name case-insensitive
+        part_lower = part.lower()
+        for member in guild.members:
+            if (member.name.lower() == part_lower or
+                member.display_name.lower() == part_lower or
+                str(member).lower() == part_lower):
+                if member not in members:
+                    members.append(member)
+                break
+
+    # Evitar duplicados
+    unique_members = []
+    seen_ids = set()
+    for member in members:
+        if member.id not in seen_ids:
+            unique_members.append(member)
+            seen_ids.add(member.id)
+
+    return unique_members
+
 class PromotionView(discord.ui.View):
     def __init__(self, server_id: str, discord_id: str, new_role: str, xp_required: int):
         super().__init__(timeout=86400)  # 24 horas
@@ -323,8 +369,9 @@ class LogsGeralView(discord.ui.View):
 
     @discord.ui.button(label="📝 Ativar Logs Gerais", style=discord.ButtonStyle.green)
     async def toggle_logs_gerais(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
         if not interaction.user.guild_permissions.manage_channels:
-            await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+            await interaction.followup.send("❌ Você não tem permissão.", ephemeral=True)
             return
         
         server_id = str(interaction.guild.id)
@@ -335,7 +382,7 @@ class LogsGeralView(discord.ui.View):
         # Atualizar embed
         embed = interaction.message.embeds[0]
         embed.set_field_at(1, name="Logs gerais", value="✅ Ligado" if new_status else "❌ Desligado", inline=True)
-        await interaction.response.edit_message(embed=embed)
+        await interaction.edit_original_response(embed=embed)
         await interaction.followup.send("Configuração atualizada.", ephemeral=True)
 
     @discord.ui.button(label="🚫 Desativar Logs Gerais", style=discord.ButtonStyle.red)
@@ -345,8 +392,9 @@ class LogsGeralView(discord.ui.View):
 
     @discord.ui.button(label="⭐ Ativar Logs XP", style=discord.ButtonStyle.green)
     async def toggle_logs_xp(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
         if not interaction.user.guild_permissions.manage_channels:
-            await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+            await interaction.followup.send("❌ Você não tem permissão.", ephemeral=True)
             return
         
         server_id = str(interaction.guild.id)
@@ -357,7 +405,7 @@ class LogsGeralView(discord.ui.View):
         # Atualizar embed
         embed = interaction.message.embeds[0]
         embed.set_field_at(2, name="Logs XP", value="✅ Ligado" if new_status else "❌ Desligado", inline=True)
-        await interaction.response.edit_message(embed=embed)
+        await interaction.edit_original_response(embed=embed)
         await interaction.followup.send("Configuração atualizada.", ephemeral=True)
 
     @discord.ui.button(label="🚫 Desativar Logs XP", style=discord.ButtonStyle.red)
@@ -366,8 +414,9 @@ class LogsGeralView(discord.ui.View):
 
     @discord.ui.button(label="👑 Ativar Logs Staff", style=discord.ButtonStyle.green)
     async def toggle_logs_staff(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
         if not interaction.user.guild_permissions.manage_channels:
-            await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+            await interaction.followup.send("❌ Você não tem permissão.", ephemeral=True)
             return
         
         server_id = str(interaction.guild.id)
@@ -378,7 +427,7 @@ class LogsGeralView(discord.ui.View):
         # Atualizar embed
         embed = interaction.message.embeds[0]
         embed.set_field_at(3, name="Logs Staff", value="✅ Ligado" if new_status else "❌ Desligado", inline=True)
-        await interaction.response.edit_message(embed=embed)
+        await interaction.edit_original_response(embed=embed)
         await interaction.followup.send("Configuração atualizada.", ephemeral=True)
 
     @discord.ui.button(label="🚫 Desativar Logs Staff", style=discord.ButtonStyle.red)
@@ -392,8 +441,9 @@ class LogsTicketView(discord.ui.View):
 
     @discord.ui.button(label="🎫 Ativar Logs Tickets", style=discord.ButtonStyle.green)
     async def toggle_logs_tickets(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
         if not interaction.user.guild_permissions.manage_channels:
-            await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+            await interaction.followup.send("❌ Você não tem permissão.", ephemeral=True)
             return
         
         server_id = str(interaction.guild.id)
@@ -404,7 +454,7 @@ class LogsTicketView(discord.ui.View):
         # Atualizar embed
         embed = interaction.message.embeds[0]
         embed.set_field_at(1, name="Logs de tickets", value="✅ Ligado" if new_status else "❌ Desligado", inline=True)
-        await interaction.response.edit_message(embed=embed)
+        await interaction.edit_original_response(embed=embed)
         await interaction.followup.send("Configuração atualizada.", ephemeral=True)
 
     @discord.ui.button(label="🚫 Desativar Logs Tickets", style=discord.ButtonStyle.red)
@@ -418,8 +468,9 @@ class DMNotificationsView(discord.ui.View):
 
     @discord.ui.button(label="👑 Alternar DM Promoções", style=discord.ButtonStyle.blurple)
     async def toggle_dm_promocoes(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
         if not interaction.user.guild_permissions.manage_channels:
-            await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+            await interaction.followup.send("❌ Você não tem permissão.", ephemeral=True)
             return
         
         server_id = str(interaction.guild.id)
@@ -430,13 +481,14 @@ class DMNotificationsView(discord.ui.View):
         # Atualizar embed
         embed = interaction.message.embeds[0]
         embed.set_field_at(0, name="DM Promoções", value="✅ Ligado" if new_status else "❌ Desligado", inline=True)
-        await interaction.response.edit_message(embed=embed)
+        await interaction.edit_original_response(embed=embed)
         await interaction.followup.send("Configuração atualizada.", ephemeral=True)
 
     @discord.ui.button(label="🏆 Alternar DM Eventos", style=discord.ButtonStyle.blurple)
     async def toggle_dm_eventos(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
         if not interaction.user.guild_permissions.manage_channels:
-            await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+            await interaction.followup.send("❌ Você não tem permissão.", ephemeral=True)
             return
         
         server_id = str(interaction.guild.id)
@@ -447,13 +499,14 @@ class DMNotificationsView(discord.ui.View):
         # Atualizar embed
         embed = interaction.message.embeds[0]
         embed.set_field_at(1, name="DM Eventos", value="✅ Ligado" if new_status else "❌ Desligado", inline=True)
-        await interaction.response.edit_message(embed=embed)
+        await interaction.edit_original_response(embed=embed)
         await interaction.followup.send("Configuração atualizada.", ephemeral=True)
 
     @discord.ui.button(label="🎫 Alternar DM Tickets", style=discord.ButtonStyle.blurple)
     async def toggle_dm_tickets(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
         if not interaction.user.guild_permissions.manage_channels:
-            await interaction.response.send_message("❌ Você não tem permissão.", ephemeral=True)
+            await interaction.followup.send("❌ Você não tem permissão.", ephemeral=True)
             return
         
         server_id = str(interaction.guild.id)
@@ -464,7 +517,7 @@ class DMNotificationsView(discord.ui.View):
         # Atualizar embed
         embed = interaction.message.embeds[0]
         embed.set_field_at(2, name="DM Tickets", value="✅ Ligado" if new_status else "❌ Desligado", inline=True)
-        await interaction.response.edit_message(embed=embed)
+        await interaction.edit_original_response(embed=embed)
         await interaction.followup.send("Configuração atualizada.", ephemeral=True)
 
     @discord.ui.button(label="👮 Alternar DM Staff", style=discord.ButtonStyle.blurple)
@@ -2215,10 +2268,15 @@ class ResultadoEventoModal(discord.ui.Modal, title="Resultado do Evento"):
             return
 
         respostas = db.get_treino_respostas(treino_id)
-        actual_ids = parse_user_ids_from_text(self.participantes.value)
-        if not actual_ids:
-            await interaction.response.send_message("❌ Você precisa informar pelo menos um participante confirmado.", ephemeral=True)
+        confirmed_members = parse_confirmed_members(interaction.guild, self.participantes.value)
+        if not confirmed_members:
+            if self.participantes.value.strip():
+                await interaction.response.send_message("❌ Nenhum participante foi encontrado. Use menção @usuario, ID ou nome exato.", ephemeral=True)
+            else:
+                await interaction.response.send_message("❌ Você precisa informar pelo menos um participante confirmado.", ephemeral=True)
             return
+
+        actual_ids = {str(member.id) for member in confirmed_members}
 
         count_vou = sum(1 for r in respostas if r["resposta"] == "vou")
         count_talvez = sum(1 for r in respostas if r["resposta"] == "talvez")
